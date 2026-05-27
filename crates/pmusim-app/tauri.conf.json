@@ -5,6 +5,7 @@
   "build": {
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": { "script": "npm run dev", "cwd": "../../frontend" },
+    "beforeBuildCommand": { "script": "npm run build", "cwd": "../../frontend" },
     "frontendDist": "../../frontend/dist"
   },
   "app": {

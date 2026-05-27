@@ -112,7 +112,8 @@ PmuSim/
 
 - [Rust](https://rustup.rs/)（stable）
 - [Node.js](https://nodejs.org/)（v18+）
-- [Tauri CLI](https://tauri.app/start/prerequisites/)
+- Tauri CLI：`cargo install tauri-cli --version '^2'`
+- 系统依赖：参考 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ### 开发模式
 
@@ -130,9 +131,11 @@ cargo test --workspace
 ### 构建
 
 ```bash
-cd frontend && npm run build
+cd frontend && npm install            # 一次性，安装 node_modules
 cd ../crates/pmusim-app && cargo tauri build
 ```
+
+`cargo tauri build` 通过 `beforeBuildCommand` 自动触发前端构建。
 
 ## 许可证
 

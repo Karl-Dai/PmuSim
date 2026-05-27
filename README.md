@@ -119,7 +119,8 @@ PmuSim/
 
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) (v18+)
-- [Tauri CLI](https://tauri.app/start/prerequisites/)
+- Tauri CLI: `cargo install tauri-cli --version '^2'`
+- OS-level deps: see [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ### Dev Mode
 
@@ -137,9 +138,11 @@ cargo test --workspace
 ### Build
 
 ```bash
-cd frontend && npm run build
+cd frontend && npm install            # one-time, populates node_modules
 cd ../crates/pmusim-app && cargo tauri build
 ```
+
+`cargo tauri build` invokes the frontend build automatically via `beforeBuildCommand`.
 
 ## License
 
