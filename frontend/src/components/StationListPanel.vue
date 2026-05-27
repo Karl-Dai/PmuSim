@@ -20,11 +20,20 @@ function selectStation(idcode: string) {
 async function connect() {
   if (busy.value) return;
   busy.value = true;
+  const host = connIp.value;
+  const port = parseInt(connPort.value);
+  const target = `${host}:${port}`;
+  const p = period.value ? parseInt(period.value) : null;
   try {
-    await invoke("connect_substation", { host: connIp.value, port: parseInt(connPort.value) });
-    // No success toast here — the actual TCP connect runs async on the backend.
-    // The "Session connected" status comes via the SessionCreated event into
-    // 子站列表; failures arrive as Error toasts (5s connect timeout).
+    await invoke("connect_substation", { host, port });
+    // Chain auto_handshake against the placeholder idcode. The backend
+    // command_loop is single-threaded and serial: do_connect inserts the
+    // placeholder + finishes TCP first, then do_auto_handshake follows
+    // the session through the re-key by (peer_host, peer_port). Without
+    // this chain the user has to remember to click 一键握手 manually,
+    // and the connect itself stays idle — substation accepts mgmt then
+    // its Bus queue piles up forever waiting on us.
+    await invoke("auto_handshake", { idcode: target, period: p });
   } catch (e) {
     pushToast(`连接失败: ${toastError(e)}`, "error");
   } finally {
