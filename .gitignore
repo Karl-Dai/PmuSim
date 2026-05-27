@@ -30,3 +30,17 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Rust
+target/
+**/*.rs.bk
+
+# Tauri (generated)
+crates/pmusim-app/gen/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Tooling
+.playwright-mcp/
