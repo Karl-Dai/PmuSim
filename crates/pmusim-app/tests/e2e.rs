@@ -124,17 +124,38 @@ struct MockObservations {
 type ObsHandle = Arc<Mutex<MockObservations>>;
 
 /// Spawn a V3 mock substation. Returns its mgmt port, its task handle, and a
-/// shared observation log.
-async fn spawn_mock_substation(master_data_port: u16) -> (u16, JoinHandle<()>, ObsHandle) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+/// shared observation log. In V3 the substation is the TCP server on BOTH
+/// mgmt (port N) and data (port N+1) — master initiates connections to both
+/// per the do_open_data_v3 mgmt+1 convention.
+async fn spawn_mock_substation(_master_data_port: u16) -> (u16, JoinHandle<()>, ObsHandle) {
+    // Bind adjacent ports so the master's `peer_mgmt_port + 1` convention
+    // resolves to the listener we control. Retry until we can hold both.
+    let (mgmt_listener, mgmt_port, data_listener) = loop {
+        let m = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let p = m.local_addr().unwrap().port();
+        match TcpListener::bind(("127.0.0.1", p + 1)).await {
+            Ok(d) => break (m, p, d),
+            Err(_) => continue, // p+1 was busy, get a fresh mgmt port
+        }
+    };
     let obs: ObsHandle = Arc::new(Mutex::new(MockObservations::default()));
     let obs_for_task = obs.clone();
 
     let task = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
+        let (stream, _) = mgmt_listener.accept().await.unwrap();
         let (mut reader, mut writer) = stream.into_split();
         let mut data_writer: Option<tokio::net::tcp::OwnedWriteHalf> = None;
+
+        // Spawn an accept task that captures the master's inbound V3 data
+        // connect (which is triggered immediately before Cmd::OpenData).
+        let (data_tx, mut data_rx) =
+            mpsc::unbounded_channel::<tokio::net::tcp::OwnedWriteHalf>();
+        tokio::spawn(async move {
+            if let Ok((s, _)) = data_listener.accept().await {
+                let (_, dw) = s.into_split();
+                let _ = data_tx.send(dw);
+            }
+        });
 
         loop {
             let frame_data = match read_one_frame(&mut reader).await {
@@ -156,11 +177,12 @@ async fn spawn_mock_substation(master_data_port: u16) -> (u16, JoinHandle<()>, O
                         writer.write_all(&bytes).await.unwrap();
                     }
                     c if c == Cmd::OpenData as u16 => {
-                        let stream = TcpStream::connect(("127.0.0.1", master_data_port))
-                            .await
-                            .unwrap();
-                        let (_, dw) = stream.into_split();
-                        data_writer = Some(dw);
+                        // Master should have already dialed our data listener
+                        // before sending Cmd::OpenData. Pick up that writer
+                        // half and start streaming on it.
+                        if data_writer.is_none() {
+                            data_writer = data_rx.recv().await;
+                        }
                         let bytes = build_data(&make_data_frame(0x67A99D11), 0, 2, 1).unwrap();
                         if let Some(dw) = data_writer.as_mut() {
                             dw.write_all(&bytes).await.unwrap();
@@ -191,7 +213,7 @@ async fn spawn_mock_substation(master_data_port: u16) -> (u16, JoinHandle<()>, O
         }
     });
 
-    (port, task, obs)
+    (mgmt_port, task, obs)
 }
 
 #[tokio::test]

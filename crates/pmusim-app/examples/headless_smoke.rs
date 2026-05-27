@@ -40,10 +40,10 @@ fn ts() -> String {
 async fn drain(
     rx: &mut mpsc::UnboundedReceiver<PmuEvent>,
     until: Instant,
-    track_real_idcode: &mut Option<String>,
     placeholder: &str,
-) -> usize {
+) -> (usize, Option<String>) {
     let mut n = 0;
+    let mut real_idcode = None;
     loop {
         let remaining = until.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -55,7 +55,7 @@ async fn drain(
                 println!("[{}] EVENT {:?}", ts(), ev);
                 if let PmuEvent::SessionCreated { idcode, .. } = &ev {
                     if idcode != placeholder && !idcode.is_empty() {
-                        *track_real_idcode = Some(idcode.clone());
+                        real_idcode = Some(idcode.clone());
                     }
                 }
             }
@@ -63,7 +63,7 @@ async fn drain(
             Err(_) => break, // timeout reached
         }
     }
-    n
+    (n, real_idcode)
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -125,7 +125,6 @@ async fn main() {
     // sent, so kick auto_handshake immediately (against the placeholder id;
     // do_send_cmd waits briefly for the session to be ready). The substation's
     // first response will re-key the session to its real IDCODE.
-    let mut real_idcode: Option<String> = None;
     print!(
         "[{}] → auto_handshake({placeholder}, period=50) ... ",
         ts()
@@ -137,27 +136,24 @@ async fn main() {
 
     // Observe handshake + initial data frames for 20s.
     println!("[{}] --- handshake + initial stream drain: 20s ---", ts());
-    let n1 = drain(
+    let (n1, real_idcode) = drain(
         &mut event_rx,
         Instant::now() + Duration::from_secs(20),
-        &mut real_idcode,
         &placeholder,
     )
     .await;
     println!("[{}] --- drain done, {n1} events ---", ts());
-    let driver_id = real_idcode.clone().unwrap_or_else(|| placeholder.clone());
+    let target_id = real_idcode.clone().unwrap_or_else(|| placeholder.clone());
 
-    print!("[{}] → disconnect_substation({driver_id}) ... ", ts());
-    let target_id = real_idcode.clone().unwrap_or(driver_id);
+    print!("[{}] → disconnect_substation({target_id}) ... ", ts());
     match master.disconnect_substation(target_id.clone()).await {
         Ok(()) => println!("queued"),
         Err(e) => println!("queue err: {e}"),
     }
 
-    let n3 = drain(
+    let (n3, _) = drain(
         &mut event_rx,
         Instant::now() + Duration::from_secs(2),
-        &mut real_idcode,
         &placeholder,
     )
     .await;

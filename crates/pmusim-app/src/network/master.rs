@@ -392,7 +392,12 @@ impl MasterStation {
                     // substation may start streaming the moment it receives
                     // OpenData. Open the pipe FIRST so the first frames are not
                     // lost to a race; do_open_data_v3 is a no-op for V2.
-                    Self::do_open_data_v3(&sessions, &event_tx, &idcode).await;
+                    // If the V3 data pipe fails to open (timeout / refused),
+                    // skip OpenData entirely — otherwise the UI flips to
+                    // Streaming on a pipe that will never deliver frames.
+                    if !Self::do_open_data_v3(&sessions, &event_tx, &idcode).await {
+                        continue;
+                    }
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::OpenData as u16).await;
                     let mut sessions_w = sessions.write().await;
                     if let Some(s) = sessions_w.get_mut(&idcode) {
@@ -483,13 +488,15 @@ impl MasterStation {
         // something to find even if the network is hung in SYN_SENT.
         {
             let mut sessions_w = sessions.write().await;
-            let dup = sessions_w.values().find(|s| {
-                s.peer_host == host
-                    && s.peer_mgmt_port == port
-                    && s.state != SessionState::Disconnected
-            });
-            if let Some(existing) = dup {
-                let existing_id = existing.idcode.clone();
+            let existing_id = sessions_w
+                .values()
+                .find(|s| {
+                    s.peer_host == host
+                        && s.peer_mgmt_port == port
+                        && s.state != SessionState::Disconnected
+                })
+                .map(|s| s.idcode.clone());
+            if let Some(existing_id) = existing_id {
                 drop(sessions_w);
                 warn!("Refusing duplicate connect to {host}:{port}; already connected/connecting as {existing_id}");
                 emit_event(
@@ -612,28 +619,41 @@ impl MasterStation {
     /// Without this, the substation's Bus queue piles up and we never see
     /// DataFrame events even though mgmt CFG/OpenData round-trips fine.
     ///
-    /// No-op for V2 sessions — those continue to use the inbound data
-    /// listener (`data_listener_loop`).
+    /// Returns `true` if the caller may proceed to send Cmd::OpenData:
+    /// `true` for V2 sessions (no-op — substation initiates data inbound),
+    /// `true` for V3 sessions whose data pipe was already open or just
+    /// connected successfully, and `false` for V3 sessions whose data
+    /// connect failed (timeout / refused) so the caller can suppress the
+    /// misleading StreamingStarted that would otherwise fire on a pipe
+    /// that never opened.
     async fn do_open_data_v3(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: &EventSender,
         idcode: &str,
-    ) {
+    ) -> bool {
         let (peer_host, data_port, version, already_open) = {
             let sessions_r = sessions.read().await;
             let Some(s) = sessions_r.get(idcode) else {
-                return;
+                return false; // session vanished — don't proceed with OpenData
+            };
+            // Substation data port = mgmt port + 1 by GB/T 26865.2 convention
+            // (8000/8001 for V3, 7000/7001 for V2). Falls back to the default
+            // table only if mgmt port is 0 (e.g. OS-assigned).
+            let data_port = if s.peer_mgmt_port == 0 {
+                default_ports(s.version).1
+            } else {
+                s.peer_mgmt_port.saturating_add(1)
             };
             (
                 s.peer_host.clone(),
-                default_ports(s.version).1,
+                data_port,
                 s.version,
                 s.data_connected(),
             )
         };
 
         if version != ProtocolVersion::V3 || already_open {
-            return;
+            return true;
         }
 
         info!("Opening V3 data pipe to {peer_host}:{data_port} for session {idcode}");
@@ -651,7 +671,7 @@ impl MasterStation {
                         error: format!("Data connect to {peer_host}:{data_port} failed: {e}"),
                     },
                 );
-                return;
+                return false;
             }
             Err(_) => {
                 error!("V3 data connect to {peer_host}:{data_port} timed out");
@@ -662,7 +682,7 @@ impl MasterStation {
                         error: format!("Data connect to {peer_host}:{data_port} timed out (5s)"),
                     },
                 );
-                return;
+                return false;
             }
         };
 
@@ -670,7 +690,7 @@ impl MasterStation {
         let session_uid = {
             let mut sessions_w = sessions.write().await;
             let Some(s) = sessions_w.get_mut(idcode) else {
-                return; // session removed during connect
+                return false; // session removed during connect
             };
             s.data_reader = Some(reader);
             s.data_writer = Some(writer);
@@ -683,6 +703,7 @@ impl MasterStation {
         tokio::spawn(async move {
             Self::data_read_loop_outbound(idcode2, session_uid, sessions2, event_tx2).await;
         });
+        true
     }
 
     /// Read loop for a V3 master-initiated outbound data pipe.
@@ -695,15 +716,24 @@ impl MasterStation {
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
     ) {
-        let reader = {
+        // Take the reader and snapshot the CFG dims under one lock so the
+        // per-frame hot path (~97 fps observed in field testing) doesn't pay
+        // an async RwLock acquire to recover invariants that don't change
+        // after handshake.
+        let (mut reader, mut dims) = {
             let mut sessions_w = sessions.write().await;
-            sessions_w
-                .get_mut(&idcode)
-                .filter(|s| s.uid == my_uid)
-                .and_then(|s| s.data_reader.take())
-        };
-        let Some(mut reader) = reader else {
-            return;
+            let Some(s) = sessions_w.get_mut(&idcode).filter(|s| s.uid == my_uid) else {
+                return;
+            };
+            let Some(reader) = s.data_reader.take() else {
+                return;
+            };
+            let dims = s
+                .cfg2
+                .as_ref()
+                .or(s.cfg1.as_ref())
+                .map(|c| (c.phnmr, c.annmr, c.dgnmr));
+            (reader, dims)
         };
 
         loop {
@@ -721,13 +751,15 @@ impl MasterStation {
                 },
             );
 
-            let dims = {
+            // If we didn't have CFG dims when the loop started (rare — pipe
+            // opened before CFG-2 reply landed), look once and cache.
+            if dims.is_none() {
                 let sessions_r = sessions.read().await;
-                sessions_r
+                dims = sessions_r
                     .get(&idcode)
                     .and_then(|s| s.cfg2.as_ref().or(s.cfg1.as_ref()))
-                    .map(|c| (c.phnmr, c.annmr, c.dgnmr))
-            };
+                    .map(|c| (c.phnmr, c.annmr, c.dgnmr));
+            }
             let (phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0));
 
             if let Ok(Frame::Data(df)) = parse(&frame_data, phnmr, annmr, dgnmr) {
@@ -803,43 +835,69 @@ impl MasterStation {
                 };
                 if let Some(real_id) = real_id {
                     if !real_id.is_empty() && real_id != current_id {
-                        let mut sessions_w = sessions.write().await;
-                        // Only re-key if the slot at current_id is still ours.
-                        let owned = sessions_w
-                            .get(&current_id)
-                            .map(|s| s.uid == my_uid)
-                            .unwrap_or(false);
-                        if owned {
-                            if let Some(mut session) = sessions_w.remove(&current_id) {
-                                let frame_version = match frame {
-                                    Frame::Command(c) => c.version,
-                                    Frame::Config(c) => c.version,
-                                    Frame::Data(d) => d.version,
-                                };
-                                session.version = frame_version;
-                                session.idcode = real_id.clone();
-                                sessions_w.insert(real_id.clone(), session);
+                        let old_id = current_id.clone();
+                        let peer_ip_for_event;
+                        let displaced_real_id;
+                        {
+                            let mut sessions_w = sessions.write().await;
+                            // Only re-key if the slot at current_id is still ours.
+                            let owned = sessions_w
+                                .get(&current_id)
+                                .map(|s| s.uid == my_uid)
+                                .unwrap_or(false);
+                            if !owned {
+                                // Slot was taken over by a newer session — abandon this loop.
+                                return;
                             }
-                            drop(sessions_w);
+                            // If a prior session is already living under real_id,
+                            // evict it explicitly so the frontend knows it's gone;
+                            // silently overwriting would drop its cached cfg1/cfg2
+                            // and leave the frontend with a ghost row.
+                            displaced_real_id = if sessions_w.contains_key(&real_id) {
+                                sessions_w.remove(&real_id).map(|mut old| {
+                                    old.close();
+                                    real_id.clone()
+                                })
+                            } else {
+                                None
+                            };
 
+                            let Some(mut session) = sessions_w.remove(&current_id) else {
+                                return;
+                            };
+                            let frame_version = match frame {
+                                Frame::Command(c) => c.version,
+                                Frame::Config(c) => c.version,
+                                Frame::Data(d) => d.version,
+                            };
+                            session.version = frame_version;
+                            session.idcode = real_id.clone();
+                            peer_ip_for_event = session.peer_ip.clone();
+                            sessions_w.insert(real_id.clone(), session);
+                        }
+
+                        // Tell the frontend the placeholder row is gone, plus any
+                        // displaced same-IDCODE record, then announce the re-keyed
+                        // session. Without the placeholder-disconnect emit, the UI
+                        // accumulates a ghost "host:port" row on every connect.
+                        emit_event(
+                            &event_tx,
+                            PmuEvent::SessionDisconnected { idcode: old_id },
+                        );
+                        if let Some(displaced) = displaced_real_id {
                             emit_event(
                                 &event_tx,
-                                PmuEvent::SessionCreated {
-                                    idcode: real_id.clone(),
-                                    peer_ip: {
-                                        let sessions_r = sessions.read().await;
-                                        sessions_r
-                                            .get(&real_id)
-                                            .map(|s| s.peer_ip.clone())
-                                            .unwrap_or_default()
-                                    },
-                                },
+                                PmuEvent::SessionDisconnected { idcode: displaced },
                             );
-                            current_id = real_id;
-                        } else {
-                            // Slot was taken over by a newer session — abandon this loop.
-                            return;
                         }
+                        emit_event(
+                            &event_tx,
+                            PmuEvent::SessionCreated {
+                                idcode: real_id.clone(),
+                                peer_ip: peer_ip_for_event,
+                            },
+                        );
+                        current_id = real_id;
                     }
                 }
             }
@@ -1167,8 +1225,12 @@ impl MasterStation {
 
         // Step 5: Open the V3 data pipe (no-op for V2), then send OpenData.
         // Order matters: substation may stream the moment it receives OpenData,
-        // so the pipe needs to exist first or initial frames are lost.
-        Self::do_open_data_v3(sessions, event_tx, &current).await;
+        // so the pipe needs to exist first or initial frames are lost. If the
+        // V3 data pipe fails (timeout/refused), skip OpenData — do_open_data_v3
+        // already emitted an Error event and StreamingStarted would lie.
+        if !Self::do_open_data_v3(sessions, event_tx, &current).await {
+            return;
+        }
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::OpenData as u16).await;
         {
             let mut sessions_w = sessions.write().await;

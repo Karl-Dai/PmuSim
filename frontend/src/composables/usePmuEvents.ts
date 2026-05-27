@@ -5,7 +5,7 @@ import { useCommLog } from "./useCommLog";
 import { useToast } from "./useToast";
 
 export function usePmuEvents() {
-  const { addSession, updateState, setConfig } = useSessions();
+  const { addSession, updateState, removeSession, setConfig } = useSessions();
   const { addLog, addData } = useCommLog();
   const { push: pushToast } = useToast();
 
@@ -16,7 +16,11 @@ export function usePmuEvents() {
           addSession(payload.idcode, payload.peer_ip);
           break;
         case "SessionDisconnected":
-          updateState(payload.idcode, "disconnected");
+          // Drop the row entirely so heartbeat-timeout, mgmt-EOF and re-key
+          // events all leave the station list clean. Without this the
+          // sessions Map and status-bar count drift up monotonically across
+          // every transient disconnect.
+          removeSession(payload.idcode);
           break;
         case "Cfg1Received":
           updateState(payload.idcode, "cfg1_received");
@@ -41,7 +45,8 @@ export function usePmuEvents() {
           addLog(payload.idcode, payload.direction, payload.hex);
           break;
         case "HeartbeatTimeout":
-          updateState(payload.idcode, "disconnected");
+          pushToast(`${payload.idcode}: 心跳超时,已断开`, "error");
+          removeSession(payload.idcode);
           break;
         case "Error":
           addLog(payload.idcode, "!", payload.error);
