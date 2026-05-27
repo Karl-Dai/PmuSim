@@ -1,5 +1,6 @@
 use pmusim_core::protocol::constants::ProtocolVersion;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::mpsc;
 
 use crate::network::master::MasterStation;
 use crate::state::AppState;
@@ -9,13 +10,27 @@ pub async fn start_server(
     app_handle: AppHandle,
     state: State<'_, AppState>,
     data_port: u16,
-    _protocol: String,
+    protocol: String,
 ) -> Result<(), String> {
+    let version = match protocol.as_str() {
+        "V2" => ProtocolVersion::V2,
+        "V3" => ProtocolVersion::V3,
+        other => return Err(format!("Unknown protocol: {other}")),
+    };
     let mut guard = state.master.lock().await;
     if guard.is_some() {
         return Err("Server already running".into());
     }
-    let mut master = MasterStation::new(app_handle, data_port, 30.0);
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let forward_handle = app_handle.clone();
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            if let Err(e) = forward_handle.emit("pmu-event", &event) {
+                log::error!("Failed to forward event: {e}");
+            }
+        }
+    });
+    let mut master = MasterStation::new(event_tx, data_port, 30.0, version);
     master.start().await?;
     *guard = Some(master);
     Ok(())
@@ -39,9 +54,8 @@ pub async fn connect_substation(
 ) -> Result<(), String> {
     let guard = state.master.lock().await;
     let master = guard.as_ref().ok_or("Server not running")?;
-    master
-        .connect_to_substation(host, port, ProtocolVersion::V3)
-        .await
+    let version = master.protocol;
+    master.connect_to_substation(host, port, version).await
 }
 
 #[tauri::command]

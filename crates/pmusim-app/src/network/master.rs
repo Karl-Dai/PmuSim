@@ -15,9 +15,11 @@ use pmusim_core::protocol::constants::{
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, Frame};
 use pmusim_core::protocol::parser::parse;
 use pmusim_core::time_utils::current_soc;
-use tauri::{AppHandle, Emitter};
-
 use crate::events::{ConfigInfo, DataInfo, PmuEvent};
+
+/// Async event sink. Tauri side forwards these to `emit("pmu-event", ...)`;
+/// tests collect them directly.
+pub type EventSender = mpsc::UnboundedSender<PmuEvent>;
 use crate::network::session::{SessionState, SubStationSession};
 
 /// Internal command dispatched from the UI thread via mpsc.
@@ -56,23 +58,30 @@ enum MasterCmd {
 pub struct MasterStation {
     pub data_port: u16,
     pub heartbeat_interval: f64,
+    pub protocol: ProtocolVersion,
     pub sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
     cmd_tx: mpsc::Sender<MasterCmd>,
     cmd_rx: Option<mpsc::Receiver<MasterCmd>>,
-    app_handle: AppHandle,
+    event_tx: EventSender,
     tasks: Vec<JoinHandle<()>>,
 }
 
 impl MasterStation {
-    pub fn new(app_handle: AppHandle, data_port: u16, heartbeat_interval: f64) -> Self {
+    pub fn new(
+        event_tx: EventSender,
+        data_port: u16,
+        heartbeat_interval: f64,
+        protocol: ProtocolVersion,
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         Self {
             data_port,
             heartbeat_interval,
+            protocol,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             cmd_tx,
             cmd_rx: Some(cmd_rx),
-            app_handle,
+            event_tx,
             tasks: Vec::new(),
         }
     }
@@ -93,7 +102,7 @@ impl MasterStation {
 
         // Spawn data listener task.
         let sessions = self.sessions.clone();
-        let handle = self.app_handle.clone();
+        let handle = self.event_tx.clone();
         self.tasks.push(tokio::spawn(async move {
             Self::data_listener_loop(listener, sessions, handle).await;
         }));
@@ -104,7 +113,7 @@ impl MasterStation {
             .take()
             .ok_or_else(|| "start() called twice".to_string())?;
         let sessions = self.sessions.clone();
-        let handle = self.app_handle.clone();
+        let handle = self.event_tx.clone();
         let hb_interval = self.heartbeat_interval;
         self.tasks.push(tokio::spawn(async move {
             Self::command_loop(cmd_rx, sessions.clone(), handle.clone()).await;
@@ -112,7 +121,7 @@ impl MasterStation {
 
         // Spawn heartbeat loop.
         let sessions = self.sessions.clone();
-        let handle = self.app_handle.clone();
+        let handle = self.event_tx.clone();
         self.tasks.push(tokio::spawn(async move {
             Self::heartbeat_loop(sessions, handle, hb_interval).await;
         }));
@@ -185,7 +194,7 @@ impl MasterStation {
     async fn data_listener_loop(
         listener: TcpListener,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
     ) {
         loop {
             let Ok((stream, addr)) = listener.accept().await else {
@@ -195,7 +204,7 @@ impl MasterStation {
             info!("Data connection from {peer_ip}");
 
             let sessions = sessions.clone();
-            let handle = app_handle.clone();
+            let handle = event_tx.clone();
             tokio::spawn(async move {
                 Self::handle_data_connection(stream, peer_ip, sessions, handle).await;
             });
@@ -207,7 +216,7 @@ impl MasterStation {
         stream: TcpStream,
         peer_ip: String,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
     ) {
         let (mut reader, writer) = stream.into_split();
 
@@ -269,7 +278,7 @@ impl MasterStation {
                 session.data_writer = Some(writer);
                 sessions_w.insert(session_idcode.clone(), session);
                 emit_event(
-                    &app_handle,
+                    &event_tx,
                     PmuEvent::SessionCreated {
                         idcode: session_idcode.clone(),
                         peer_ip: peer_ip.clone(),
@@ -285,7 +294,7 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         emit_event(
-                            &app_handle,
+                            &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
                                 data: data_frame_to_info(&df),
@@ -308,7 +317,7 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         emit_event(
-                            &app_handle,
+                            &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
                                 data: data_frame_to_info(&df),
@@ -320,7 +329,7 @@ impl MasterStation {
             drop(sessions_r);
 
             emit_event(
-                &app_handle,
+                &event_tx,
                 PmuEvent::RawFrame {
                     idcode: session_idcode.clone(),
                     direction: "recv".into(),
@@ -336,7 +345,7 @@ impl MasterStation {
             if !session.mgmt_connected() {
                 session.state = SessionState::Disconnected;
                 emit_event(
-                    &app_handle,
+                    &event_tx,
                     PmuEvent::SessionDisconnected {
                         idcode: session_idcode.clone(),
                     },
@@ -349,43 +358,43 @@ impl MasterStation {
     async fn command_loop(
         mut cmd_rx: mpsc::Receiver<MasterCmd>,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
     ) {
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 MasterCmd::Connect { host, port, version } => {
-                    Self::do_connect(host, port, version, sessions.clone(), app_handle.clone()).await;
+                    Self::do_connect(host, port, version, sessions.clone(), event_tx.clone()).await;
                 }
                 MasterCmd::RequestCfg1 { idcode } => {
-                    Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::SendCfg1 as u16).await;
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg1 as u16).await;
                 }
                 MasterCmd::SendCfg2Cmd { idcode } => {
-                    Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::SendCfg2Cmd as u16).await;
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg2Cmd as u16).await;
                 }
                 MasterCmd::SendCfg2 { idcode, period } => {
-                    Self::do_send_cfg2(&sessions, &app_handle, &idcode, period).await;
+                    Self::do_send_cfg2(&sessions, &event_tx, &idcode, period).await;
                 }
                 MasterCmd::RequestCfg2 { idcode } => {
-                    Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::SendCfg2 as u16).await;
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg2 as u16).await;
                 }
                 MasterCmd::OpenData { idcode } => {
-                    Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::OpenData as u16).await;
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::OpenData as u16).await;
                     let mut sessions_w = sessions.write().await;
                     if let Some(s) = sessions_w.get_mut(&idcode) {
                         s.state = SessionState::Streaming;
                     }
-                    emit_event(&app_handle, PmuEvent::StreamingStarted { idcode });
+                    emit_event(&event_tx, PmuEvent::StreamingStarted { idcode });
                 }
                 MasterCmd::CloseData { idcode } => {
-                    Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::CloseData as u16).await;
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::CloseData as u16).await;
                     let mut sessions_w = sessions.write().await;
                     if let Some(s) = sessions_w.get_mut(&idcode) {
                         s.state = SessionState::Cfg2Sent;
                     }
-                    emit_event(&app_handle, PmuEvent::StreamingStopped { idcode });
+                    emit_event(&event_tx, PmuEvent::StreamingStopped { idcode });
                 }
                 MasterCmd::AutoHandshake { idcode, period } => {
-                    Self::do_auto_handshake(&sessions, &app_handle, &idcode, period).await;
+                    Self::do_auto_handshake(&sessions, &event_tx, &idcode, period).await;
                 }
             }
         }
@@ -394,7 +403,7 @@ impl MasterStation {
     /// Send heartbeats periodically.
     async fn heartbeat_loop(
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
         interval_secs: f64,
     ) {
         let interval = tokio::time::Duration::from_secs_f64(interval_secs);
@@ -411,7 +420,7 @@ impl MasterStation {
             };
 
             for idcode in idcodes {
-                Self::do_send_cmd(&sessions, &app_handle, &idcode, Cmd::Heartbeat as u16).await;
+                Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::Heartbeat as u16).await;
 
                 let mut sessions_w = sessions.write().await;
                 if let Some(session) = sessions_w.get_mut(&idcode) {
@@ -419,7 +428,7 @@ impl MasterStation {
                     if session.missed_heartbeats >= 3 {
                         session.state = SessionState::Disconnected;
                         emit_event(
-                            &app_handle,
+                            &event_tx,
                             PmuEvent::HeartbeatTimeout {
                                 idcode: idcode.clone(),
                             },
@@ -440,14 +449,14 @@ impl MasterStation {
         port: u16,
         version: ProtocolVersion,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
     ) {
         let stream = match TcpStream::connect((host.as_str(), port)).await {
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to connect to {host}:{port}: {e}");
                 emit_event(
-                    &app_handle,
+                    &event_tx,
                     PmuEvent::Error {
                         idcode: String::new(),
                         error: format!("Failed to connect {host}:{port}: {e}"),
@@ -472,7 +481,7 @@ impl MasterStation {
         }
 
         emit_event(
-            &app_handle,
+            &event_tx,
             PmuEvent::SessionCreated {
                 idcode: tmp_id.clone(),
                 peer_ip: host,
@@ -482,7 +491,7 @@ impl MasterStation {
 
         // Spawn management read loop - needs to take ownership of the reader.
         let sessions2 = sessions.clone();
-        let handle2 = app_handle.clone();
+        let handle2 = event_tx.clone();
         tokio::spawn(async move {
             Self::mgmt_read_loop(tmp_id, sessions2, handle2).await;
         });
@@ -492,7 +501,7 @@ impl MasterStation {
     async fn mgmt_read_loop(
         initial_id: String,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: AppHandle,
+        event_tx: EventSender,
     ) {
         let mut current_id = initial_id.clone();
 
@@ -542,7 +551,7 @@ impl MasterStation {
                         drop(sessions_w);
 
                         emit_event(
-                            &app_handle,
+                            &event_tx,
                             PmuEvent::SessionCreated {
                                 idcode: real_id.clone(),
                                 peer_ip: {
@@ -561,7 +570,7 @@ impl MasterStation {
 
             // Process the frame.
             if let Some(frame) = parsed {
-                Self::process_mgmt_frame(&sessions, &app_handle, &current_id, &frame, &frame_data)
+                Self::process_mgmt_frame(&sessions, &event_tx, &current_id, &frame, &frame_data)
                     .await;
             }
         }
@@ -573,7 +582,7 @@ impl MasterStation {
             if !session.data_connected() {
                 session.state = SessionState::Disconnected;
                 emit_event(
-                    &app_handle,
+                    &event_tx,
                     PmuEvent::SessionDisconnected {
                         idcode: current_id,
                     },
@@ -585,13 +594,13 @@ impl MasterStation {
     /// Process a frame received on the management pipe.
     async fn process_mgmt_frame(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: &AppHandle,
+        event_tx: &EventSender,
         idcode: &str,
         frame: &Frame,
         raw: &[u8],
     ) {
         emit_event(
-            app_handle,
+            event_tx,
             PmuEvent::RawFrame {
                 idcode: idcode.to_string(),
                 direction: "recv".into(),
@@ -620,7 +629,7 @@ impl MasterStation {
                     }
                     drop(sessions_w);
                     emit_event(
-                        app_handle,
+                        event_tx,
                         PmuEvent::Cfg1Received {
                             idcode: idcode.to_string(),
                             cfg: info,
@@ -634,7 +643,7 @@ impl MasterStation {
                     }
                     drop(sessions_w);
                     emit_event(
-                        app_handle,
+                        event_tx,
                         PmuEvent::Cfg2Received {
                             idcode: idcode.to_string(),
                             cfg: info,
@@ -651,7 +660,7 @@ impl MasterStation {
     /// Send a command frame to a substation.
     async fn do_send_cmd(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: &AppHandle,
+        event_tx: &EventSender,
         idcode: &str,
         cmd: u16,
     ) {
@@ -665,7 +674,7 @@ impl MasterStation {
 
         if !has_writer {
             emit_event(
-                app_handle,
+                event_tx,
                 PmuEvent::Error {
                     idcode: idcode.to_string(),
                     error: "Management pipe not connected".into(),
@@ -703,7 +712,7 @@ impl MasterStation {
         drop(sessions_w);
 
         emit_event(
-            app_handle,
+            event_tx,
             PmuEvent::RawFrame {
                 idcode: idcode.to_string(),
                 direction: "send".into(),
@@ -715,7 +724,7 @@ impl MasterStation {
     /// Build and send CFG-2 based on the stored CFG-1 template.
     async fn do_send_cfg2(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: &AppHandle,
+        event_tx: &EventSender,
         idcode: &str,
         period: Option<u16>,
     ) {
@@ -728,7 +737,7 @@ impl MasterStation {
             };
             if !session.mgmt_connected() {
                 emit_event(
-                    app_handle,
+                    event_tx,
                     PmuEvent::Error {
                         idcode: idcode.to_string(),
                         error: "Management pipe not connected".into(),
@@ -740,7 +749,7 @@ impl MasterStation {
                 Some(c) => c,
                 None => {
                     emit_event(
-                        app_handle,
+                        event_tx,
                         PmuEvent::Error {
                             idcode: idcode.to_string(),
                             error: "No CFG-1 available".into(),
@@ -752,7 +761,7 @@ impl MasterStation {
 
             ConfigFrame {
                 version: cfg1.version,
-                cfg_type: 2, // CFG-1 type value reused for builder (maps to Cfg1 frame type)
+                cfg_type: FrameType::Cfg2 as u8,
                 idcode: cfg1.idcode.clone(),
                 soc: current_soc(),
                 fracsec: 0,
@@ -799,7 +808,7 @@ impl MasterStation {
         }
 
         emit_event(
-            app_handle,
+            event_tx,
             PmuEvent::RawFrame {
                 idcode: idcode.to_string(),
                 direction: "send".into(),
@@ -807,67 +816,88 @@ impl MasterStation {
             },
         );
         emit_event(
-            app_handle,
+            event_tx,
             PmuEvent::Cfg2Sent {
                 idcode: idcode.to_string(),
             },
         );
     }
 
-    /// Automated handshake sequence.
+    /// Automated handshake sequence. After SendCfg1 the substation's real
+    /// IDCODE arrives and the session is re-keyed, so we resolve the current
+    /// idcode via peer_host:peer_mgmt_port before each subsequent step.
     async fn do_auto_handshake(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
-        app_handle: &AppHandle,
+        event_tx: &EventSender,
         idcode: &str,
         period: Option<u16>,
     ) {
-        // Step 1: Request CFG-1.
-        Self::do_send_cmd(sessions, app_handle, idcode, Cmd::SendCfg1 as u16).await;
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        // Capture peer identity so we can follow the session across re-key.
+        let peer = {
+            let r = sessions.read().await;
+            r.get(idcode)
+                .map(|s| (s.peer_host.clone(), s.peer_mgmt_port))
+        };
+        let Some((peer_host, peer_port)) = peer else {
+            emit_event(
+                event_tx,
+                PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: "Session not found".into(),
+                },
+            );
+            return;
+        };
 
-        // Check if CFG-1 was received.
+        // Step 1: Request CFG-1.
+        Self::do_send_cmd(sessions, event_tx, idcode, Cmd::SendCfg1 as u16).await;
+
+        // Wait up to 2s for CFG-1 to arrive (idcode may have been re-keyed).
+        let current = match wait_for_cfg1(
+            sessions,
+            &peer_host,
+            peer_port,
+            std::time::Duration::from_secs(2),
+        )
+        .await
         {
-            let sessions_r = sessions.read().await;
-            if let Some(session) = sessions_r.get(idcode) {
-                if session.cfg1.is_none() {
-                    emit_event(
-                        app_handle,
-                        PmuEvent::Error {
-                            idcode: idcode.to_string(),
-                            error: "CFG-1 not received after request".into(),
-                        },
-                    );
-                    return;
-                }
-            } else {
+            Some(id) => id,
+            None => {
+                emit_event(
+                    event_tx,
+                    PmuEvent::Error {
+                        idcode: idcode.to_string(),
+                        error: "CFG-1 not received after request".into(),
+                    },
+                );
                 return;
             }
-        }
+        };
 
         // Step 2: Send CFG-2 command.
-        Self::do_send_cmd(sessions, app_handle, idcode, Cmd::SendCfg2Cmd as u16).await;
+        Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2Cmd as u16).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Step 3: Send CFG-2 config.
-        Self::do_send_cfg2(sessions, app_handle, idcode, period).await;
+        Self::do_send_cfg2(sessions, event_tx, &current, period).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Step 4: Request CFG-2 back.
-        Self::do_send_cmd(sessions, app_handle, idcode, Cmd::SendCfg2 as u16).await;
+        Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2 as u16).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Step 5: Open data.
-        Self::do_send_cmd(sessions, app_handle, idcode, Cmd::OpenData as u16).await;
+        Self::do_send_cmd(sessions, event_tx, &current, Cmd::OpenData as u16).await;
         {
             let mut sessions_w = sessions.write().await;
-            if let Some(session) = sessions_w.get_mut(idcode) {
+            if let Some(session) = sessions_w.get_mut(&current) {
                 session.state = SessionState::Streaming;
             }
         }
         emit_event(
-            app_handle,
+            event_tx,
             PmuEvent::StreamingStarted {
-                idcode: idcode.to_string(),
+                idcode: current,
             },
         );
     }
@@ -876,6 +906,35 @@ impl MasterStation {
 // =============================================================================
 // Free helpers
 // =============================================================================
+
+/// Poll `sessions` for a session whose peer matches `(host, port)` and that
+/// has received a CFG-1. Returns the session's current idcode (may differ
+/// from the original tmp_id after re-key) or `None` on timeout.
+async fn wait_for_cfg1(
+    sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+    peer_host: &str,
+    peer_port: u16,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        {
+            let r = sessions.read().await;
+            for (id, s) in r.iter() {
+                if s.peer_host == peer_host
+                    && s.peer_mgmt_port == peer_port
+                    && s.cfg1.is_some()
+                {
+                    return Some(id.clone());
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
 
 /// Read a complete frame from a TCP stream.
 async fn read_frame(reader: &mut OwnedReadHalf) -> Result<Vec<u8>, String> {
@@ -919,8 +978,8 @@ fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo 
     }
 }
 
-fn emit_event(app_handle: &AppHandle, event: PmuEvent) {
-    if let Err(e) = app_handle.emit("pmu-event", &event) {
+fn emit_event(event_tx: &EventSender, event: PmuEvent) {
+    if let Err(e) = event_tx.send(event) {
         error!("Failed to emit event: {e}");
     }
 }

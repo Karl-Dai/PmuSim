@@ -11,13 +11,15 @@ const cfg = computed(() => configs.get(selectedIdcode.value));
     <fieldset>
       <legend>基本信息</legend>
       <table class="info-table">
-        <tr><td>配置类型</td><td>CFG-{{ cfg.cfgType }}</td></tr>
-        <tr><td>协议版本</td><td>V{{ cfg.version }}</td></tr>
-        <tr><td>站名</td><td>{{ cfg.stn }}</td></tr>
-        <tr><td>IDCODE</td><td>{{ cfg.idcode }}</td></tr>
-        <tr><td>FORMAT</td><td>0x{{ cfg.formatFlags.toString(16).padStart(4, '0').toUpperCase() }}</td></tr>
-        <tr><td>PERIOD</td><td>{{ cfg.period }}</td></tr>
-        <tr><td>MEAS_RATE</td><td>{{ cfg.measRate }}</td></tr>
+        <tbody>
+          <tr><td>配置类型</td><td>CFG-{{ cfg.cfgType }}</td></tr>
+          <tr><td>协议版本</td><td>V{{ cfg.version }}</td></tr>
+          <tr><td>站名</td><td>{{ cfg.stn }}</td></tr>
+          <tr><td>IDCODE</td><td>{{ cfg.idcode }}</td></tr>
+          <tr><td>FORMAT</td><td>0x{{ cfg.formatFlags.toString(16).padStart(4, '0').toUpperCase() }}</td></tr>
+          <tr><td>PERIOD</td><td>{{ cfg.period }}</td></tr>
+          <tr><td>MEAS_RATE</td><td>{{ cfg.measRate }}</td></tr>
+        </tbody>
       </table>
     </fieldset>
     <fieldset>

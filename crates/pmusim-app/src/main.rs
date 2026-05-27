@@ -1,11 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod commands;
-mod events;
-mod network;
-mod state;
-
-use state::AppState;
+use pmusim_app::{commands, state::AppState};
 
 fn main() {
     tauri::Builder::default()
