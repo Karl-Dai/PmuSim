@@ -1,6 +1,13 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use pmusim_core::protocol::constants::ProtocolVersion;
 use pmusim_core::protocol::frame::ConfigFrame;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+
+/// Process-wide monotonic counter for session UIDs. Never reused, so a
+/// background task spawned for session N can detect that the slot at its
+/// key was replaced by session M (M > N) and refuse to mutate it.
+static NEXT_SESSION_UID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
@@ -12,6 +19,9 @@ pub enum SessionState {
 }
 
 pub struct SubStationSession {
+    /// Monotonic id, set once at construction. Used by spawned loops to
+    /// detect "my session got replaced under the same key".
+    pub uid: u64,
     pub idcode: String,
     pub version: ProtocolVersion,
     pub peer_ip: String,
@@ -34,6 +44,7 @@ pub struct SubStationSession {
 impl SubStationSession {
     pub fn new(idcode: String, version: ProtocolVersion, peer_ip: String) -> Self {
         Self {
+            uid: NEXT_SESSION_UID.fetch_add(1, Ordering::Relaxed),
             idcode,
             version,
             peer_ip: peer_ip.clone(),

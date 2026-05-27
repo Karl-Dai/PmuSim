@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { usePmuEvents } from "./composables/usePmuEvents";
 import { useSessions } from "./composables/useSessions";
+import { useToast } from "./composables/useToast";
 import ToolbarPanel from "./components/ToolbarPanel.vue";
 import StationListPanel from "./components/StationListPanel.vue";
 import ConfigTab from "./components/ConfigTab.vue";
@@ -10,6 +11,7 @@ import LogTab from "./components/LogTab.vue";
 
 const { startListening } = usePmuEvents();
 const { sessions } = useSessions();
+const { toasts, dismiss } = useToast();
 const activeTab = ref("config");
 
 onMounted(() => {
@@ -36,6 +38,12 @@ onMounted(() => {
       </div>
     </div>
     <div class="status-bar">已连接子站: {{ sessions.size }}</div>
+
+    <div class="toasts" aria-live="polite">
+      <div v-for="t in toasts" :key="t.id" :class="['toast', `toast-${t.kind}`]" @click="dismiss(t.id)">
+        {{ t.message }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -50,4 +58,34 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .tabs button.active { border-bottom-color: #0078d7; color: #0078d7; font-weight: 600; }
 .tab-content { flex: 1; overflow: auto; padding: 8px; }
 .status-bar { padding: 4px 8px; background: #e8e8e8; border-top: 1px solid #ccc; font-size: 12px; color: #666; }
+
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 1000;
+  max-width: 360px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  padding: 8px 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
+  line-height: 1.4;
+  animation: toast-in 0.18s ease-out;
+}
+.toast-error { background: #fde8e8; color: #9b1c1c; border: 1px solid #f5b5b5; }
+.toast-info { background: #e6f0fb; color: #1a4f8b; border: 1px solid #b8d2ec; }
+.toast-success { background: #e6f6ea; color: #1d6638; border: 1px solid #b6e0c1; }
+@keyframes toast-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
 </style>

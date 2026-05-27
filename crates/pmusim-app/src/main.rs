@@ -10,6 +10,7 @@ fn main() {
             commands::start_server,
             commands::stop_server,
             commands::connect_substation,
+            commands::disconnect_substation,
             commands::send_command,
             commands::auto_handshake,
         ])

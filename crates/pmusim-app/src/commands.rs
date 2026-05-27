@@ -80,3 +80,13 @@ pub async fn auto_handshake(
     let master = guard.as_ref().ok_or("Server not running")?;
     master.auto_handshake(idcode, period).await
 }
+
+#[tauri::command]
+pub async fn disconnect_substation(
+    state: State<'_, AppState>,
+    idcode: String,
+) -> Result<(), String> {
+    let guard = state.master.lock().await;
+    let master = guard.as_ref().ok_or("Server not running")?;
+    master.disconnect_substation(idcode).await
+}

@@ -2,10 +2,12 @@ import { listen } from "@tauri-apps/api/event";
 import type { PmuEvent } from "../types";
 import { useSessions } from "./useSessions";
 import { useCommLog } from "./useCommLog";
+import { useToast } from "./useToast";
 
 export function usePmuEvents() {
-  const { addSession, updateState, removeSession, setConfig } = useSessions();
+  const { addSession, updateState, setConfig } = useSessions();
   const { addLog, addData } = useCommLog();
+  const { push: pushToast } = useToast();
 
   async function startListening() {
     await listen<PmuEvent>("pmu-event", ({ payload }) => {
@@ -43,6 +45,7 @@ export function usePmuEvents() {
           break;
         case "Error":
           addLog(payload.idcode, "!", payload.error);
+          pushToast(payload.idcode ? `${payload.idcode}: ${payload.error}` : payload.error, "error");
           break;
       }
     });

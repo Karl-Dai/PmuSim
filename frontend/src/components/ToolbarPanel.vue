@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast, toastError } from "../composables/useToast";
+
+const { push: pushToast } = useToast();
 
 const protocol = ref("V3");
 const dataPort = ref("8001");
@@ -11,13 +14,23 @@ function onProtocolChange() {
 }
 
 async function start() {
-  await invoke("start_server", { dataPort: parseInt(dataPort.value), protocol: protocol.value });
-  running.value = true;
+  try {
+    await invoke("start_server", { dataPort: parseInt(dataPort.value), protocol: protocol.value });
+    running.value = true;
+    pushToast(`已启动 (${protocol.value}, 端口 ${dataPort.value})`, "success");
+  } catch (e) {
+    pushToast(`启动失败: ${toastError(e)}`, "error");
+  }
 }
 
 async function stop() {
-  await invoke("stop_server");
-  running.value = false;
+  try {
+    await invoke("stop_server");
+    running.value = false;
+    pushToast("已停止", "info");
+  } catch (e) {
+    pushToast(`停止失败: ${toastError(e)}`, "error");
+  }
 }
 </script>
 

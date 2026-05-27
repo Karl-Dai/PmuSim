@@ -53,6 +53,9 @@ enum MasterCmd {
         idcode: String,
         period: Option<u16>,
     },
+    Disconnect {
+        idcode: String,
+    },
 }
 
 pub struct MasterStation {
@@ -182,6 +185,13 @@ impl MasterStation {
                 idcode,
                 period: period.map(|p| p as u16),
             })
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn disconnect_substation(&self, idcode: String) -> Result<(), String> {
+        self.cmd_tx
+            .send(MasterCmd::Disconnect { idcode })
             .await
             .map_err(|e| e.to_string())
     }
@@ -396,6 +406,9 @@ impl MasterStation {
                 MasterCmd::AutoHandshake { idcode, period } => {
                     Self::do_auto_handshake(&sessions, &event_tx, &idcode, period).await;
                 }
+                MasterCmd::Disconnect { idcode } => {
+                    Self::do_disconnect(&sessions, &event_tx, &idcode).await;
+                }
             }
         }
     }
@@ -451,6 +464,36 @@ impl MasterStation {
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
     ) {
+        // Reject duplicate connects to the same (host, port). Without this guard,
+        // a second connect inserts a new session under the same key, drops the
+        // previous session struct, and the old `mgmt_writer` destructor sends FIN
+        // — the substation sees an immediate EOF on what looked like a fresh
+        // connection. The user has to explicitly disconnect first.
+        {
+            let sessions_r = sessions.read().await;
+            let dup = sessions_r.values().find(|s| {
+                s.peer_host == host
+                    && s.peer_mgmt_port == port
+                    && s.state != SessionState::Disconnected
+                    && s.mgmt_connected()
+            });
+            if let Some(existing) = dup {
+                let existing_id = existing.idcode.clone();
+                drop(sessions_r);
+                warn!("Refusing duplicate connect to {host}:{port}; already connected as {existing_id}");
+                emit_event(
+                    &event_tx,
+                    PmuEvent::Error {
+                        idcode: existing_id.clone(),
+                        error: format!(
+                            "Already connected to {host}:{port} (session {existing_id}); disconnect first"
+                        ),
+                    },
+                );
+                return;
+            }
+        }
+
         let stream = match TcpStream::connect((host.as_str(), port)).await {
             Ok(s) => s,
             Err(e) => {
@@ -470,6 +513,7 @@ impl MasterStation {
 
         let tmp_id = format!("{host}:{port}");
         let mut session = SubStationSession::new(tmp_id.clone(), version, host.clone());
+        let session_uid = session.uid;
         session.peer_host = host.clone();
         session.peer_mgmt_port = port;
         session.mgmt_reader = Some(reader);
@@ -493,13 +537,42 @@ impl MasterStation {
         let sessions2 = sessions.clone();
         let handle2 = event_tx.clone();
         tokio::spawn(async move {
-            Self::mgmt_read_loop(tmp_id, sessions2, handle2).await;
+            Self::mgmt_read_loop(tmp_id, session_uid, sessions2, handle2).await;
         });
     }
 
+    /// Cleanly disconnect a session: remove it from the map (which drops
+    /// reader/writer halves, closing both TCP pipes) and emit
+    /// SessionDisconnected.
+    async fn do_disconnect(
+        sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        event_tx: &EventSender,
+        idcode: &str,
+    ) {
+        let removed = {
+            let mut sessions_w = sessions.write().await;
+            sessions_w.remove(idcode)
+        };
+        if let Some(mut session) = removed {
+            session.close();
+            info!("Disconnected session {idcode}");
+            emit_event(
+                event_tx,
+                PmuEvent::SessionDisconnected {
+                    idcode: idcode.to_string(),
+                },
+            );
+        }
+    }
+
     /// Read loop for an outbound management connection.
+    ///
+    /// `my_uid` is the SubStationSession::uid captured at spawn time. Every
+    /// mutation cross-checks it so a stale loop (whose session has been
+    /// removed or replaced under the same key) never touches the live state.
     async fn mgmt_read_loop(
         initial_id: String,
+        my_uid: u64,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
     ) {
@@ -510,6 +583,7 @@ impl MasterStation {
             let mut sessions_w = sessions.write().await;
             sessions_w
                 .get_mut(&current_id)
+                .filter(|s| s.uid == my_uid)
                 .and_then(|s| s.mgmt_reader.take())
         };
         let Some(mut reader) = reader else {
@@ -537,33 +611,42 @@ impl MasterStation {
                 if let Some(real_id) = real_id {
                     if !real_id.is_empty() && real_id != current_id {
                         let mut sessions_w = sessions.write().await;
-                        if let Some(mut session) = sessions_w.remove(&current_id) {
-                            // Update version from frame if needed.
-                            let frame_version = match frame {
-                                Frame::Command(c) => c.version,
-                                Frame::Config(c) => c.version,
-                                Frame::Data(d) => d.version,
-                            };
-                            session.version = frame_version;
-                            session.idcode = real_id.clone();
-                            sessions_w.insert(real_id.clone(), session);
-                        }
-                        drop(sessions_w);
+                        // Only re-key if the slot at current_id is still ours.
+                        let owned = sessions_w
+                            .get(&current_id)
+                            .map(|s| s.uid == my_uid)
+                            .unwrap_or(false);
+                        if owned {
+                            if let Some(mut session) = sessions_w.remove(&current_id) {
+                                let frame_version = match frame {
+                                    Frame::Command(c) => c.version,
+                                    Frame::Config(c) => c.version,
+                                    Frame::Data(d) => d.version,
+                                };
+                                session.version = frame_version;
+                                session.idcode = real_id.clone();
+                                sessions_w.insert(real_id.clone(), session);
+                            }
+                            drop(sessions_w);
 
-                        emit_event(
-                            &event_tx,
-                            PmuEvent::SessionCreated {
-                                idcode: real_id.clone(),
-                                peer_ip: {
-                                    let sessions_r = sessions.read().await;
-                                    sessions_r
-                                        .get(&real_id)
-                                        .map(|s| s.peer_ip.clone())
-                                        .unwrap_or_default()
+                            emit_event(
+                                &event_tx,
+                                PmuEvent::SessionCreated {
+                                    idcode: real_id.clone(),
+                                    peer_ip: {
+                                        let sessions_r = sessions.read().await;
+                                        sessions_r
+                                            .get(&real_id)
+                                            .map(|s| s.peer_ip.clone())
+                                            .unwrap_or_default()
+                                    },
                                 },
-                            },
-                        );
-                        current_id = real_id;
+                            );
+                            current_id = real_id;
+                        } else {
+                            // Slot was taken over by a newer session — abandon this loop.
+                            return;
+                        }
                     }
                 }
             }
@@ -575,9 +658,12 @@ impl MasterStation {
             }
         }
 
-        // Cleanup on disconnect.
+        // Cleanup on disconnect — only if the slot is still ours.
         let mut sessions_w = sessions.write().await;
         if let Some(session) = sessions_w.get_mut(&current_id) {
+            if session.uid != my_uid {
+                return;
+            }
             session.mgmt_writer = None;
             if !session.data_connected() {
                 session.state = SessionState::Disconnected;

@@ -2,11 +2,14 @@
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessions } from "../composables/useSessions";
+import { useToast, toastError } from "../composables/useToast";
 
-const { sessions, selectedIdcode } = useSessions();
+const { sessions, selectedIdcode, removeSession } = useSessions();
+const { push: pushToast } = useToast();
 const connIp = ref("127.0.0.1");
 const connPort = ref("8000");
 const period = ref("");
+const busy = ref(false);
 
 const stationList = computed(() => Array.from(sessions.values()));
 
@@ -15,16 +18,44 @@ function selectStation(idcode: string) {
 }
 
 async function connect() {
-  await invoke("connect_substation", { host: connIp.value, port: parseInt(connPort.value) });
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    await invoke("connect_substation", { host: connIp.value, port: parseInt(connPort.value) });
+    pushToast(`连接 ${connIp.value}:${connPort.value} 已发起`, "info");
+  } catch (e) {
+    pushToast(`连接失败: ${toastError(e)}`, "error");
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function disconnect() {
+  if (!selectedIdcode.value) return;
+  const id = selectedIdcode.value;
+  try {
+    await invoke("disconnect_substation", { idcode: id });
+    removeSession(id);
+    pushToast(`已断开 ${id}`, "info");
+  } catch (e) {
+    pushToast(`断开失败: ${toastError(e)}`, "error");
+  }
 }
 
 async function sendCmd(cmd: string) {
-  if (!selectedIdcode.value) return;
+  if (!selectedIdcode.value) {
+    pushToast("请先选择一个子站", "error");
+    return;
+  }
   const p = period.value ? parseInt(period.value) : null;
-  if (cmd === "auto_handshake") {
-    await invoke("auto_handshake", { idcode: selectedIdcode.value, period: p });
-  } else {
-    await invoke("send_command", { idcode: selectedIdcode.value, cmd, period: p });
+  try {
+    if (cmd === "auto_handshake") {
+      await invoke("auto_handshake", { idcode: selectedIdcode.value, period: p });
+    } else {
+      await invoke("send_command", { idcode: selectedIdcode.value, cmd, period: p });
+    }
+  } catch (e) {
+    pushToast(`命令 ${cmd} 失败: ${toastError(e)}`, "error");
   }
 }
 </script>
@@ -45,7 +76,8 @@ async function sendCmd(cmd: string) {
       <legend>连接子站</legend>
       <div class="form-row"><label>IP:</label><input v-model="connIp" style="width:110px" /></div>
       <div class="form-row"><label>端口:</label><input v-model="connPort" style="width:60px" /></div>
-      <button class="full-btn" @click="connect">连接</button>
+      <button class="full-btn" :disabled="busy" @click="connect">{{ busy ? '连接中…' : '连接' }}</button>
+      <button class="full-btn" :disabled="!selectedIdcode" @click="disconnect">断开所选</button>
     </fieldset>
 
     <fieldset>
@@ -78,6 +110,7 @@ legend { font-size: 12px; color: #555; padding: 0 4px; }
 .form-row label { min-width: 40px; color: #555; }
 .form-row input { padding: 2px 4px; border: 1px solid #bbb; border-radius: 3px; }
 .full-btn { width: 100%; padding: 4px; margin: 2px 0; border: 1px solid #bbb; border-radius: 3px; background: #e8e8e8; cursor: pointer; }
-.full-btn:hover { background: #ddd; }
+.full-btn:hover:not(:disabled) { background: #ddd; }
+.full-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 hr { border: none; border-top: 1px solid #ddd; margin: 4px 0; }
 </style>
