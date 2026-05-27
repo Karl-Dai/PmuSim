@@ -22,7 +22,9 @@ async function connect() {
   busy.value = true;
   try {
     await invoke("connect_substation", { host: connIp.value, port: parseInt(connPort.value) });
-    pushToast(`连接 ${connIp.value}:${connPort.value} 已发起`, "info");
+    // No success toast here — the actual TCP connect runs async on the backend.
+    // The "Session connected" status comes via the SessionCreated event into
+    // 子站列表; failures arrive as Error toasts (5s connect timeout).
   } catch (e) {
     pushToast(`连接失败: ${toastError(e)}`, "error");
   } finally {

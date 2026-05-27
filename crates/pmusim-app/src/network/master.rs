@@ -464,23 +464,28 @@ impl MasterStation {
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
     ) {
-        // Reject duplicate connects to the same (host, port). Without this guard,
-        // a second connect inserts a new session under the same key, drops the
-        // previous session struct, and the old `mgmt_writer` destructor sends FIN
-        // — the substation sees an immediate EOF on what looked like a fresh
-        // connection. The user has to explicitly disconnect first.
+        let tmp_id = format!("{host}:{port}");
+
+        // Insert a "pending" placeholder atomically so that a second, queued
+        // connect to the same target sees it and bails out — *before* the TCP
+        // SYN flight settles. Without this, click-spamming "连接" while the
+        // first TcpStream::connect is still in progress queues N connect
+        // commands; each one passes the duplicate guard (no session exists
+        // yet) and tries its own TCP connect. The substation then sees a
+        // storm of accept/EOF pairs as each successor session overwrites the
+        // previous one. The placeholder also gives the duplicate guard
+        // something to find even if the network is hung in SYN_SENT.
         {
-            let sessions_r = sessions.read().await;
-            let dup = sessions_r.values().find(|s| {
+            let mut sessions_w = sessions.write().await;
+            let dup = sessions_w.values().find(|s| {
                 s.peer_host == host
                     && s.peer_mgmt_port == port
                     && s.state != SessionState::Disconnected
-                    && s.mgmt_connected()
             });
             if let Some(existing) = dup {
                 let existing_id = existing.idcode.clone();
-                drop(sessions_r);
-                warn!("Refusing duplicate connect to {host}:{port}; already connected as {existing_id}");
+                drop(sessions_w);
+                warn!("Refusing duplicate connect to {host}:{port}; already connected/connecting as {existing_id}");
                 emit_event(
                     &event_tx,
                     PmuEvent::Error {
@@ -492,18 +497,56 @@ impl MasterStation {
                 );
                 return;
             }
+
+            let mut placeholder = SubStationSession::new(tmp_id.clone(), version, host.clone());
+            placeholder.peer_host = host.clone();
+            placeholder.peer_mgmt_port = port;
+            // No reader/writer yet — the TCP connect hasn't returned.
+            sessions_w.insert(tmp_id.clone(), placeholder);
         }
 
-        let stream = match TcpStream::connect((host.as_str(), port)).await {
-            Ok(s) => s,
-            Err(e) => {
+        // Emit SessionCreated for the pending session so the UI shows "connecting…"
+        emit_event(
+            &event_tx,
+            PmuEvent::SessionCreated {
+                idcode: tmp_id.clone(),
+                peer_ip: host.clone(),
+            },
+        );
+
+        // Bounded TCP connect — fail fast instead of waiting for the OS's ~75s default.
+        let connect_fut = TcpStream::connect((host.as_str(), port));
+        let stream = match tokio::time::timeout(std::time::Duration::from_secs(5), connect_fut).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
                 error!("Failed to connect to {host}:{port}: {e}");
+                sessions.write().await.remove(&tmp_id);
                 emit_event(
                     &event_tx,
                     PmuEvent::Error {
-                        idcode: String::new(),
+                        idcode: tmp_id.clone(),
                         error: format!("Failed to connect {host}:{port}: {e}"),
                     },
+                );
+                emit_event(
+                    &event_tx,
+                    PmuEvent::SessionDisconnected { idcode: tmp_id },
+                );
+                return;
+            }
+            Err(_) => {
+                error!("Timed out connecting to {host}:{port} after 5s");
+                sessions.write().await.remove(&tmp_id);
+                emit_event(
+                    &event_tx,
+                    PmuEvent::Error {
+                        idcode: tmp_id.clone(),
+                        error: format!("Connect to {host}:{port} timed out (5s)"),
+                    },
+                );
+                emit_event(
+                    &event_tx,
+                    PmuEvent::SessionDisconnected { idcode: tmp_id },
                 );
                 return;
             }
@@ -511,26 +554,18 @@ impl MasterStation {
 
         let (reader, writer) = stream.into_split();
 
-        let tmp_id = format!("{host}:{port}");
-        let mut session = SubStationSession::new(tmp_id.clone(), version, host.clone());
-        let session_uid = session.uid;
-        session.peer_host = host.clone();
-        session.peer_mgmt_port = port;
-        session.mgmt_reader = Some(reader);
-        session.mgmt_writer = Some(writer);
-
-        {
+        // Attach the live socket to the placeholder we already inserted.
+        let session_uid = {
             let mut sessions_w = sessions.write().await;
-            sessions_w.insert(tmp_id.clone(), session);
-        }
+            let Some(session) = sessions_w.get_mut(&tmp_id) else {
+                // Placeholder vanished (user clicked 断开 during the connect?). Drop the socket.
+                return;
+            };
+            session.mgmt_reader = Some(reader);
+            session.mgmt_writer = Some(writer);
+            session.uid
+        };
 
-        emit_event(
-            &event_tx,
-            PmuEvent::SessionCreated {
-                idcode: tmp_id.clone(),
-                peer_ip: host,
-            },
-        );
         info!("Management pipe connected to {tmp_id}");
 
         // Spawn management read loop - needs to take ownership of the reader.
