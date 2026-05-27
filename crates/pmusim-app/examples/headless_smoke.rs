@@ -121,39 +121,31 @@ async fn main() {
         Err(e) => println!("queue err: {e}"),
     }
 
-    // Phase 1: observe the connect outcome for up to 10s.
+    // Some substations close the mgmt pipe within seconds if no command is
+    // sent, so kick auto_handshake immediately (against the placeholder id;
+    // do_send_cmd waits briefly for the session to be ready). The substation's
+    // first response will re-key the session to its real IDCODE.
     let mut real_idcode: Option<String> = None;
-    println!("[{}] --- phase 1: observe connect for 10s ---", ts());
-    let n1 = drain(
-        &mut event_rx,
-        Instant::now() + Duration::from_secs(10),
-        &mut real_idcode,
-        &placeholder,
-    )
-    .await;
-    println!("[{}] --- phase 1 done, {n1} events ---", ts());
-
-    // Phase 2: if a real IDCODE surfaced (substation responded with a frame
-    // carrying its idcode), drive an auto_handshake against that idcode.
-    let driver_id = real_idcode.clone().unwrap_or_else(|| placeholder.clone());
     print!(
-        "[{}] → auto_handshake({driver_id}, period=50) ... ",
+        "[{}] → auto_handshake({placeholder}, period=50) ... ",
         ts()
     );
-    match master.auto_handshake(driver_id.clone(), Some(50)).await {
+    match master.auto_handshake(placeholder.clone(), Some(50)).await {
         Ok(()) => println!("queued"),
         Err(e) => println!("queue err: {e}"),
     }
 
-    println!("[{}] --- phase 2: observe handshake for 12s ---", ts());
-    let n2 = drain(
+    // Observe handshake + initial data frames for 20s.
+    println!("[{}] --- handshake + initial stream drain: 20s ---", ts());
+    let n1 = drain(
         &mut event_rx,
-        Instant::now() + Duration::from_secs(12),
+        Instant::now() + Duration::from_secs(20),
         &mut real_idcode,
         &placeholder,
     )
     .await;
-    println!("[{}] --- phase 2 done, {n2} events ---", ts());
+    println!("[{}] --- drain done, {n1} events ---", ts());
+    let driver_id = real_idcode.clone().unwrap_or_else(|| placeholder.clone());
 
     print!("[{}] → disconnect_substation({driver_id}) ... ", ts());
     let target_id = real_idcode.clone().unwrap_or(driver_id);

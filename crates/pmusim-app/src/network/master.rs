@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use pmusim_core::protocol::builder::{build_command, build_config};
 use pmusim_core::protocol::constants::{
-    Cmd, FrameType, ProtocolVersion, IDCODE_LEN, SYNC_BYTE,
+    default_ports, Cmd, FrameType, ProtocolVersion, IDCODE_LEN, SYNC_BYTE,
 };
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, Frame};
 use pmusim_core::protocol::parser::parse;
@@ -388,11 +388,17 @@ impl MasterStation {
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg2 as u16).await;
                 }
                 MasterCmd::OpenData { idcode } => {
+                    // For V3 the data pipe runs from master → substation, and the
+                    // substation may start streaming the moment it receives
+                    // OpenData. Open the pipe FIRST so the first frames are not
+                    // lost to a race; do_open_data_v3 is a no-op for V2.
+                    Self::do_open_data_v3(&sessions, &event_tx, &idcode).await;
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::OpenData as u16).await;
                     let mut sessions_w = sessions.write().await;
                     if let Some(s) = sessions_w.get_mut(&idcode) {
                         s.state = SessionState::Streaming;
                     }
+                    drop(sessions_w);
                     emit_event(&event_tx, PmuEvent::StreamingStarted { idcode });
                 }
                 MasterCmd::CloseData { idcode } => {
@@ -597,6 +603,158 @@ impl MasterStation {
                     idcode: idcode.to_string(),
                 },
             );
+        }
+    }
+
+    /// Open the V3 data pipe to a substation. V3 (GB/T 26865.2-2011) inverts
+    /// the data-pipe direction from V2: substation acts as a TCP server on
+    /// its data port (mgmt_port + 1 by convention), master connects out.
+    /// Without this, the substation's Bus queue piles up and we never see
+    /// DataFrame events even though mgmt CFG/OpenData round-trips fine.
+    ///
+    /// No-op for V2 sessions — those continue to use the inbound data
+    /// listener (`data_listener_loop`).
+    async fn do_open_data_v3(
+        sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        event_tx: &EventSender,
+        idcode: &str,
+    ) {
+        let (peer_host, data_port, version, already_open) = {
+            let sessions_r = sessions.read().await;
+            let Some(s) = sessions_r.get(idcode) else {
+                return;
+            };
+            (
+                s.peer_host.clone(),
+                default_ports(s.version).1,
+                s.version,
+                s.data_connected(),
+            )
+        };
+
+        if version != ProtocolVersion::V3 || already_open {
+            return;
+        }
+
+        info!("Opening V3 data pipe to {peer_host}:{data_port} for session {idcode}");
+
+        let connect_fut = TcpStream::connect((peer_host.as_str(), data_port));
+        let stream = match tokio::time::timeout(std::time::Duration::from_secs(5), connect_fut).await
+        {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                error!("V3 data connect to {peer_host}:{data_port} failed: {e}");
+                emit_event(
+                    event_tx,
+                    PmuEvent::Error {
+                        idcode: idcode.to_string(),
+                        error: format!("Data connect to {peer_host}:{data_port} failed: {e}"),
+                    },
+                );
+                return;
+            }
+            Err(_) => {
+                error!("V3 data connect to {peer_host}:{data_port} timed out");
+                emit_event(
+                    event_tx,
+                    PmuEvent::Error {
+                        idcode: idcode.to_string(),
+                        error: format!("Data connect to {peer_host}:{data_port} timed out (5s)"),
+                    },
+                );
+                return;
+            }
+        };
+
+        let (reader, writer) = stream.into_split();
+        let session_uid = {
+            let mut sessions_w = sessions.write().await;
+            let Some(s) = sessions_w.get_mut(idcode) else {
+                return; // session removed during connect
+            };
+            s.data_reader = Some(reader);
+            s.data_writer = Some(writer);
+            s.uid
+        };
+
+        let sessions2 = sessions.clone();
+        let event_tx2 = event_tx.clone();
+        let idcode2 = idcode.to_string();
+        tokio::spawn(async move {
+            Self::data_read_loop_outbound(idcode2, session_uid, sessions2, event_tx2).await;
+        });
+    }
+
+    /// Read loop for a V3 master-initiated outbound data pipe.
+    /// Parses each frame using the session's cached CFG-2 (falling back to
+    /// CFG-1) dimensions, emits DataFrame + RawFrame events. Cleanup is
+    /// uid-checked so a stale loop never disturbs a successor session.
+    async fn data_read_loop_outbound(
+        idcode: String,
+        my_uid: u64,
+        sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
+        event_tx: EventSender,
+    ) {
+        let reader = {
+            let mut sessions_w = sessions.write().await;
+            sessions_w
+                .get_mut(&idcode)
+                .filter(|s| s.uid == my_uid)
+                .and_then(|s| s.data_reader.take())
+        };
+        let Some(mut reader) = reader else {
+            return;
+        };
+
+        loop {
+            let frame_data = match read_frame(&mut reader).await {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+
+            emit_event(
+                &event_tx,
+                PmuEvent::RawFrame {
+                    idcode: idcode.clone(),
+                    direction: "recv".into(),
+                    hex: hex_encode(&frame_data),
+                },
+            );
+
+            let dims = {
+                let sessions_r = sessions.read().await;
+                sessions_r
+                    .get(&idcode)
+                    .and_then(|s| s.cfg2.as_ref().or(s.cfg1.as_ref()))
+                    .map(|c| (c.phnmr, c.annmr, c.dgnmr))
+            };
+            let (phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0));
+
+            if let Ok(Frame::Data(df)) = parse(&frame_data, phnmr, annmr, dgnmr) {
+                emit_event(
+                    &event_tx,
+                    PmuEvent::DataFrame {
+                        idcode: idcode.clone(),
+                        data: data_frame_to_info(&df),
+                    },
+                );
+            }
+        }
+
+        // Cleanup — only if we still own the slot.
+        let mut sessions_w = sessions.write().await;
+        if let Some(s) = sessions_w.get_mut(&idcode) {
+            if s.uid != my_uid {
+                return;
+            }
+            s.data_writer = None;
+            if !s.mgmt_connected() {
+                s.state = SessionState::Disconnected;
+                emit_event(
+                    &event_tx,
+                    PmuEvent::SessionDisconnected { idcode },
+                );
+            }
         }
     }
 
@@ -1007,7 +1165,10 @@ impl MasterStation {
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2 as u16).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // Step 5: Open data.
+        // Step 5: Open the V3 data pipe (no-op for V2), then send OpenData.
+        // Order matters: substation may stream the moment it receives OpenData,
+        // so the pipe needs to exist first or initial frames are lost.
+        Self::do_open_data_v3(sessions, event_tx, &current).await;
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::OpenData as u16).await;
         {
             let mut sessions_w = sessions.write().await;
