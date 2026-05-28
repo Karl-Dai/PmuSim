@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use log::{error, info, warn};
@@ -50,6 +51,11 @@ enum MasterCmd {
     CloseData {
         idcode: String,
     },
+    /// Master-side "联网触发" (CMD 0xA000, bit15-13=101) per V3 §8 表 3.
+    /// Substation reacts implementation-defined; we just send the frame.
+    Trigger {
+        idcode: String,
+    },
     AutoHandshake {
         idcode: String,
         period: Option<u16>,
@@ -61,7 +67,11 @@ enum MasterCmd {
 
 pub struct MasterStation {
     pub data_port: u16,
-    pub heartbeat_interval: f64,
+    /// Heartbeat interval in milliseconds. Held as an Arc<AtomicU64> so the
+    /// already-spawned `heartbeat_loop` reads the current value on every
+    /// iteration — letting the UI re-tune it live without re-spawning the
+    /// task.
+    pub heartbeat_interval_ms: Arc<AtomicU64>,
     pub protocol: ProtocolVersion,
     pub sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
     cmd_tx: mpsc::Sender<MasterCmd>,
@@ -80,7 +90,9 @@ impl MasterStation {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         Self {
             data_port,
-            heartbeat_interval,
+            heartbeat_interval_ms: Arc::new(AtomicU64::new(
+                (heartbeat_interval * 1000.0) as u64,
+            )),
             protocol,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             cmd_tx,
@@ -88,6 +100,14 @@ impl MasterStation {
             event_tx,
             tasks: Vec::new(),
         }
+    }
+
+    /// Re-tune the heartbeat interval at runtime. The existing
+    /// `heartbeat_loop` picks up the new value on its next iteration —
+    /// no task respawn required.
+    pub fn set_heartbeat_interval(&self, secs: f64) {
+        let ms = (secs.max(0.1) * 1000.0) as u64;
+        self.heartbeat_interval_ms.store(ms, Ordering::Relaxed);
     }
 
     /// Start the data TCP listener (V2 only), command loop, and heartbeat loop.
@@ -124,7 +144,7 @@ impl MasterStation {
             .ok_or_else(|| "start() called twice".to_string())?;
         let sessions = self.sessions.clone();
         let handle = self.event_tx.clone();
-        let hb_interval = self.heartbeat_interval;
+        let hb_interval = self.heartbeat_interval_ms.clone();
         self.tasks.push(tokio::spawn(async move {
             Self::command_loop(cmd_rx, sessions.clone(), handle.clone()).await;
         }));
@@ -183,6 +203,7 @@ impl MasterStation {
             "request_cfg2" => MasterCmd::RequestCfg2 { idcode },
             "open_data" => MasterCmd::OpenData { idcode },
             "close_data" => MasterCmd::CloseData { idcode },
+            "trigger" => MasterCmd::Trigger { idcode },
             other => return Err(format!("Unknown command: {other}")),
         };
         self.cmd_tx.send(mc).await.map_err(|e| e.to_string())
@@ -423,6 +444,9 @@ impl MasterStation {
                     }
                     emit_event(&event_tx, PmuEvent::StreamingStopped { idcode });
                 }
+                MasterCmd::Trigger { idcode } => {
+                    Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::Trigger as u16).await;
+                }
                 MasterCmd::AutoHandshake { idcode, period } => {
                     Self::do_auto_handshake(&sessions, &event_tx, &idcode, period).await;
                 }
@@ -433,15 +457,17 @@ impl MasterStation {
         }
     }
 
-    /// Send heartbeats periodically.
+    /// Send heartbeats periodically. The sleep interval is read fresh from
+    /// `interval_ms` each iteration so a UI-driven `set_heartbeat_interval`
+    /// takes effect on the next tick without restarting the loop.
     async fn heartbeat_loop(
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
-        interval_secs: f64,
+        interval_ms: Arc<AtomicU64>,
     ) {
-        let interval = tokio::time::Duration::from_secs_f64(interval_secs);
         loop {
-            tokio::time::sleep(interval).await;
+            let ms = interval_ms.load(Ordering::Relaxed).max(100);
+            tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
 
             let idcodes: Vec<String> = {
                 let sessions_r = sessions.read().await;

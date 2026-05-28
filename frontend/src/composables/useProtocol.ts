@@ -1,8 +1,7 @@
 import { ref } from "vue";
 
-// Single shared protocol selection across the toolbar + station list panel.
-// Lifting it out of either panel ensures the data-port field in
-// StationListPanel responds to the toolbar's protocol toggle.
+// Single shared protocol selection used by ConfigInfoPanel and any future
+// consumers. Module-level so the value survives v-if re-mounts.
 export type Protocol = "V2" | "V3";
 
 const protocol = ref<Protocol>("V3");

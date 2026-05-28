@@ -13,6 +13,7 @@ fn main() {
             commands::disconnect_substation,
             commands::send_command,
             commands::auto_handshake,
+            commands::set_heartbeat_interval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PmuSim");

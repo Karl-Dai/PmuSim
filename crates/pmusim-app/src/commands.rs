@@ -93,3 +93,14 @@ pub async fn disconnect_substation(
     let master = guard.as_ref().ok_or("Server not running")?;
     master.disconnect_substation(idcode).await
 }
+
+#[tauri::command]
+pub async fn set_heartbeat_interval(
+    state: State<'_, AppState>,
+    seconds: f64,
+) -> Result<(), String> {
+    let guard = state.master.lock().await;
+    let master = guard.as_ref().ok_or("Server not running")?;
+    master.set_heartbeat_interval(seconds);
+    Ok(())
+}

@@ -1,10 +1,9 @@
 import { ref } from "vue";
 
-// Shared "is master server running" flag. ToolbarPanel owns transitions
-// (start_server / stop_server); StationListPanel reads it to gate the
-// connect button so users can't fire connect_substation while the Rust
-// side master is None (which would otherwise produce a stream of
-// "Server not running" toasts after every click).
+// Shared "is master server running" flag. ConfigInfoPanel sets it on
+// start_server / stop_server and reads it to gate all connection / data
+// commands (otherwise the Rust side rejects every call with "Server not
+// running" and the UI floods toasts).
 const running = ref(false);
 
 export function useServerStatus() {

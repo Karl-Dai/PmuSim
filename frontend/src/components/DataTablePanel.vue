@@ -1,0 +1,186 @@
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import { useSessions } from "../composables/useSessions";
+import { useCommLog } from "../composables/useCommLog";
+
+const { selectedIdcode, configs } = useSessions();
+const { latestData } = useCommLog();
+const selectedRow = ref(-1);
+
+const cfg = computed(() => configs.get(selectedIdcode.value));
+
+// STAT bit decoding per V3 §8.11 表 12. Returned as fixed 4 rows so the table
+// row count is stable (and so the user sees row 01-04 even before any data
+// arrives).
+const statRows = computed(() => {
+  const stat = latestData.value?.data.stat;
+  const has = stat !== undefined;
+  const triggerReasons: Record<number, string> = {
+    0: "手动",
+    1: "幅值越下限",
+    2: "幅值越上限",
+    3: "相角差",
+    4: "频率越限",
+    5: "频率变化率越限",
+    6: "线性组合",
+    7: "开关量",
+    8: "低频振荡",
+  };
+  return [
+    { name: "数据可用", value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常" },
+    { name: "装置状态", value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常" },
+    { name: "同步状态", value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步" },
+    { name: "触发原因", value: !has ? "-" : (stat! & 0x0800) === 0 ? "无" : (triggerReasons[stat! & 0xF] ?? "未知") },
+  ];
+});
+
+// channel_names layout per spec §8.2/8.5: phasors..analogs..digitals,
+// each digital group has 16 entries. Slice accordingly.
+const analogNames = computed(() => {
+  if (!cfg.value) return [];
+  const start = cfg.value.phnmr;
+  return cfg.value.channelNames.slice(start, start + cfg.value.annmr);
+});
+
+const digitalNames = computed(() => {
+  if (!cfg.value) return [];
+  const start = cfg.value.phnmr + cfg.value.annmr;
+  return cfg.value.channelNames.slice(start, start + cfg.value.dgnmr * 16);
+});
+
+function analogValue(i: number): string {
+  const v = latestData.value?.data.analog[i];
+  return v === undefined ? "-" : v.toFixed(3);
+}
+
+function digitalBit(i: number): string {
+  const data = latestData.value?.data.digital;
+  if (!data) return "-";
+  const wordIdx = Math.floor(i / 16);
+  const bitIdx = i % 16;
+  const word = data[wordIdx];
+  if (word === undefined) return "-";
+  return (word >> bitIdx) & 1 ? "合位" : "分位";
+}
+
+function digitalMask(i: number): string {
+  // High 16 bits of DIGUNIT word i/16 carry the normally-open/closed mask;
+  // low 16 bits carry validity. We just expose validity, matching the
+  // reference UI's "比例系数" column being a per-row constant.
+  if (!cfg.value) return "";
+  const wordIdx = Math.floor(i / 16);
+  const u = cfg.value.anunit; // placeholder — DIGUNIT not exposed yet
+  return u ? "" : "";
+}
+
+function selectRow(idx: number) {
+  selectedRow.value = idx;
+}
+</script>
+
+<template>
+  <div class="data-table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 50px">序号</th>
+          <th>名称</th>
+          <th style="width: 120px">状态/数值</th>
+          <th style="width: 160px">比例系数/开关量状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- STAT 4 rows -->
+        <tr v-for="(r, i) in statRows" :key="`stat-${i}`"
+            :class="{ selected: selectedRow === i }"
+            @click="selectRow(i)">
+          <td>{{ String(i + 1).padStart(2, '0') }}</td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.value }}</td>
+          <td></td>
+        </tr>
+        <!-- Analog rows -->
+        <tr v-for="(name, i) in analogNames" :key="`an-${i}`"
+            :class="{ selected: selectedRow === 4 + i }"
+            @click="selectRow(4 + i)">
+          <td>{{ String(5 + i).padStart(2, '0') }}</td>
+          <td>{{ name || `AN_${i + 1}` }}</td>
+          <td>{{ analogValue(i) }}</td>
+          <td>{{ cfg?.anunit[i] ?? 0 }}</td>
+        </tr>
+        <!-- Digital rows -->
+        <tr v-for="(name, i) in digitalNames" :key="`dg-${i}`"
+            :class="{ selected: selectedRow === 4 + analogNames.length + i }"
+            @click="selectRow(4 + analogNames.length + i)">
+          <td>{{ String(5 + analogNames.length + i).padStart(2, '0') }}</td>
+          <td>{{ name || `DG_${i + 1}` }}</td>
+          <td>{{ digitalBit(i) }}</td>
+          <td>{{ digitalMask(i) }}</td>
+        </tr>
+        <tr v-if="!cfg" class="empty-row">
+          <td colspan="4">点击「连接」后,CFG-2 到达再显示通道列表</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
+
+<style scoped>
+.data-table-wrap {
+  flex: 1;
+  overflow: auto;
+  background: #fefef0; /* very light yellow, matches reference */
+  border: 1px solid #888;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  background: #d8d8c8;
+  font-weight: 600;
+  color: #333;
+  padding: 6px 8px;
+  text-align: left;
+  border-right: 1px solid #aaa;
+  border-bottom: 1px solid #888;
+}
+.data-table thead th:last-child {
+  border-right: none;
+}
+.data-table tbody td {
+  padding: 4px 8px;
+  border-right: 1px solid #d8d8b8;
+  border-bottom: 1px solid #e8e8c8;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.data-table tbody td:nth-child(2) {
+  font-family: -apple-system, "PingFang SC", sans-serif;
+}
+.data-table tbody td:last-child {
+  border-right: none;
+}
+.data-table tbody tr {
+  cursor: pointer;
+}
+.data-table tbody tr:hover {
+  background: #f5f5d8;
+}
+.data-table tbody tr.selected {
+  background: #2a78d4;
+  color: #fff;
+}
+.data-table tbody tr.selected td {
+  border-right-color: #1a58a4;
+  border-bottom-color: #1a58a4;
+}
+.empty-row td {
+  color: #999;
+  text-align: center;
+  font-style: italic;
+  padding: 20px;
+}
+</style>
