@@ -47,6 +47,12 @@ pub fn poll_events(state: State<'_, AppState>) -> Vec<PmuEvent> {
 pub async fn stop_server(state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.master.lock().await;
     if let Some(master) = guard.as_mut() {
+        // Drop in-flight stragglers (last DataFrame, last RawFrame...)
+        // BEFORE stop() so the SessionDisconnected events stop() pushes
+        // are guaranteed delivered to the next frontend poll. Drain
+        // ordering matters: drain-then-stop-then-(let buffer fill via
+        // forward task)-then-poll cleanly hands off "tear-down" events.
+        let _ = state.events.drain();
         master.stop().await;
     }
     *guard = None;

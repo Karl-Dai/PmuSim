@@ -48,9 +48,16 @@ const digitalNames = computed(() => {
   return cfg.value.channelNames.slice(start, start + cfg.value.dgnmr * 16);
 });
 
+// Render the engineering value (raw_int × ANUNIT × 0.00001) per V3 §8.5
+// 表 8 row 16 — the reference UI shows e.g. "2.000" for "风速_1" with
+// ANUNIT=100000 (factor=1.0). Falling back to raw when factor=0 keeps
+// the cell informative even if a malformed CFG-2 left anunit empty.
 function analogValue(i: number): string {
   const v = latestData.value?.data.analog[i];
-  return v === undefined ? "-" : v.toFixed(3);
+  if (v === undefined) return "-";
+  const rawFactor = cfg.value?.anunit?.[i];
+  if (!rawFactor) return v.toString();
+  return (v * rawFactor * 0.00001).toFixed(3);
 }
 
 function digitalBit(i: number): string {
@@ -61,16 +68,6 @@ function digitalBit(i: number): string {
   const word = data[wordIdx];
   if (word === undefined) return "-";
   return (word >> bitIdx) & 1 ? "合位" : "分位";
-}
-
-function digitalMask(i: number): string {
-  // High 16 bits of DIGUNIT word i/16 carry the normally-open/closed mask;
-  // low 16 bits carry validity. We just expose validity, matching the
-  // reference UI's "比例系数" column being a per-row constant.
-  if (!cfg.value) return "";
-  const wordIdx = Math.floor(i / 16);
-  const u = cfg.value.anunit; // placeholder — DIGUNIT not exposed yet
-  return u ? "" : "";
 }
 
 function selectRow(idx: number) {
@@ -115,7 +112,7 @@ function selectRow(idx: number) {
           <td>{{ String(5 + analogNames.length + i).padStart(2, '0') }}</td>
           <td>{{ name || `DG_${i + 1}` }}</td>
           <td>{{ digitalBit(i) }}</td>
-          <td>{{ digitalMask(i) }}</td>
+          <td></td>
         </tr>
         <tr v-if="!cfg" class="empty-row">
           <td colspan="4">点击「连接」后,CFG-2 到达再显示通道列表</td>

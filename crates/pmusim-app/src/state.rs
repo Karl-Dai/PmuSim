@@ -22,11 +22,20 @@ impl EventBuffer {
     pub fn push(&self, ev: PmuEvent) {
         let mut q = self.inner.lock().expect("event buffer poisoned");
         if q.len() >= MAX_BUFFER {
-            // Backpressure: drop the oldest. The UI polls every 100 ms so
-            // overflow only happens when the frontend is paused (devtools
-            // open, etc.). Dropping is better than blocking the network
-            // task forwarding it.
-            q.pop_front();
+            // Backpressure: prefer to drop the oldest DataFrame/RawFrame
+            // rather than the oldest event of any type. Lifecycle events
+            // (SessionCreated, Cfg1Received, StreamingStarted, ...) drive
+            // UI state transitions; losing one strands the rest. Frame
+            // data is a high-frequency stream where one missing sample is
+            // invisible. Fallback to FIFO if everything is lifecycle.
+            let drop_idx = q.iter().position(|e| {
+                matches!(e, PmuEvent::DataFrame { .. } | PmuEvent::RawFrame { .. })
+            });
+            if let Some(i) = drop_idx {
+                q.remove(i);
+            } else {
+                q.pop_front();
+            }
         }
         q.push_back(ev);
     }

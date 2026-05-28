@@ -12,7 +12,7 @@ import { listenerReady } from "../composables/usePmuEvents";
 
 const { protocol } = useProtocol();
 const { running } = useServerStatus();
-const { sessions, selectedIdcode } = useSessions();
+const { sessions, configs, selectedIdcode } = useSessions();
 const { latestData } = useCommLog();
 const { events } = useEventLog();
 const { fps } = useFrameRate();
@@ -48,10 +48,7 @@ const heartbeatSecs = ref("5");
 
 // Selected session for IDCODE / status display.
 const session = computed(() => sessions.get(selectedIdcode.value));
-const cfg = computed(() => {
-  const sid = selectedIdcode.value;
-  return sid ? useSessions().configs.get(sid) : undefined;
-});
+const cfg = computed(() => configs.get(selectedIdcode.value));
 
 const idcodeDisplay = computed(() => session.value?.idcode ?? "");
 const stateLabel = computed(() => {
@@ -65,11 +62,17 @@ const stateLabel = computed(() => {
   }[s ?? "disconnected"] ?? "";
 });
 
-// Latest data SOC → wall time string.
+// Latest data SOC → wall time string. Per V3 §8.11:
+//   ms = FRACSEC_count / (MEAS_RATE / 1000)
+// FRACSEC low 24 bits = sub-second count; high 8 bits = time quality
+// (currently dropped here — TODO #9 in docs/TODO.md will expose them).
 const latestTime = computed(() => {
   const d = latestData.value?.data;
   if (!d) return "—";
-  const ms = d.soc * 1000 + (d.fracsec & 0xFFFFFF) / 1000; // 假设 MEAS_RATE=1e6
+  const measRate = cfg.value?.measRate ?? 1_000_000;
+  const fracsecCount = d.fracsec & 0xFFFFFF;
+  const msOffset = measRate > 0 ? fracsecCount / (measRate / 1000) : 0;
+  const ms = d.soc * 1000 + msOffset;
   const date = new Date(ms);
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds()).padStart(3, "0")}`;
@@ -111,7 +114,7 @@ async function startEverything() {
     if (!session.value) {
       const mgmt = parseInt(connMgmtPort.value);
       const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
-      await invoke("connect_substation", { host: connIp.value, port: mgmt, dataPort: data });
+      await invoke("connect_substation", { host: connIp.value.trim(), port: mgmt, dataPort: data });
     }
     // 4. auto handshake with the chosen PERIOD (PERIOD value = (cycles*100); Hz→cycles = 50/Hz)
     const hz = parseFloat(rateHz.value);
@@ -122,7 +125,7 @@ async function startEverything() {
     }
     // We don't yet know the real idcode; auto_handshake resolves it from
     // peer (host:port) so the placeholder works.
-    const target = session.value?.idcode ?? `${connIp.value}:${connMgmtPort.value}`;
+    const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
     await invoke("auto_handshake", { idcode: target, period: periodVal });
   } catch (e) {
     pushToast(`启动失败: ${toastError(e)}`, "error");
@@ -174,6 +177,25 @@ watch(heartbeatSecs, async (v) => {
     }
   }
 });
+
+// Rate live update — push fresh CFG-2 to substation. Only valid once
+// CFG-1 has been received (cfg2_sent / streaming); before then the
+// initial auto_handshake will carry the chosen rate.
+watch(rateHz, async (v) => {
+  const s = session.value;
+  if (!s) return;
+  if (s.state !== "streaming" && s.state !== "cfg2_sent") return;
+  const hz = parseFloat(v);
+  if (!Number.isFinite(hz) || hz <= 0) return;
+  const periodVal = Math.round((1000 / hz) * 100 / 20);
+  try {
+    await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2_cmd", period: null });
+    await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2", period: periodVal });
+    pushToast(`已下发新速率 ${hz}Hz`, "info");
+  } catch (e) {
+    pushToast(`修改速率失败: ${toastError(e)}`, "error");
+  }
+});
 </script>
 
 <template>
@@ -189,7 +211,7 @@ watch(heartbeatSecs, async (v) => {
       <div class="row"><label>IDCODE:</label><input :value="idcodeDisplay" readonly :class="{ readonly: true }" /></div>
       <div class="row">
         <label>速率:</label>
-        <select v-model="rateHz" :disabled="session?.state === 'streaming'">
+        <select v-model="rateHz">
           <option value="25">25 Hz</option>
           <option value="50">50 Hz</option>
           <option value="100">100 Hz</option>

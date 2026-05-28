@@ -25,7 +25,7 @@ export const listenerReady: Promise<void> = new Promise((res) => {
 
 export function usePmuEvents() {
   const { addSession, updateState, removeSession, setConfig } = useSessions();
-  const { addLog, addData } = useCommLog();
+  const { addData } = useCommLog();
   const { push: pushToast } = useToast();
   const { push: pushEvent } = useEventLog();
   const { tick: tickFrameRate, reset: resetFrameRate } = useFrameRate();
@@ -71,7 +71,10 @@ export function usePmuEvents() {
         tickFrameRate();
         break;
       case "RawFrame":
-        addLog(payload.idcode, payload.direction, payload.hex);
+        // The new UI does not render the raw-frame stream (a future hex
+        // viewer can re-attach to useCommLog). Until then, silently drop
+        // — buffering ~100 frames/s into a 1000-cap ring is just a 10s
+        // sliding window of hex strings nobody reads.
         break;
       case "HeartbeatTimeout":
         pushToast(`${payload.idcode}: 心跳超时,已断开`, "error");
@@ -80,7 +83,6 @@ export function usePmuEvents() {
         resetFrameRate();
         break;
       case "Error":
-        addLog(payload.idcode, "!", payload.error);
         pushToast(payload.idcode ? `${payload.idcode}: ${payload.error}` : payload.error, "error");
         pushEvent(payload.error, "error");
         break;
@@ -88,11 +90,13 @@ export function usePmuEvents() {
   }
 
   function startListening() {
-    // Kick off polling. We don't await anything — the backend buffer is
-    // already accumulating from the moment AppState is constructed, so
-    // even events emitted before this point are not lost (they wait in
-    // VecDeque until our first poll).
-    setInterval(async () => {
+    // setTimeout chain instead of setInterval: each poll must complete
+    // before the next starts. If two polls race (setInterval allows this
+    // when invoke takes > POLL_INTERVAL_MS), they call drain() in
+    // arbitrary order and handle() across drains can re-order events
+    // (SessionCreated arriving after the SessionDisconnected that closed
+    // it). Sequential chain preserves emit-order end-to-end.
+    const pollOnce = async () => {
       try {
         const events = await invoke<PmuEvent[]>("poll_events");
         for (const ev of events) handle(ev);
@@ -100,8 +104,11 @@ export function usePmuEvents() {
         // First-call failures are expected during webview boot; log only.
         // eslint-disable-next-line no-console
         console.warn("poll_events failed", e);
+      } finally {
+        setTimeout(pollOnce, POLL_INTERVAL_MS);
       }
-    }, POLL_INTERVAL_MS);
+    };
+    pollOnce();
     resolveReady();
   }
 

@@ -164,11 +164,25 @@ impl MasterStation {
         for task in self.tasks.drain(..) {
             task.abort();
         }
+        // Snapshot the live session idcodes BEFORE closing, then emit a
+        // SessionDisconnected for each so the frontend's reactive session
+        // map drops them. Without this, useSessions on the JS side keeps
+        // q1234567 alive across stop→start cycles and the UI shows a
+        // ghost session that never reconnects (selectedIdcode points at
+        // a session the backend already destroyed).
+        let live: Vec<String> = {
+            let sessions_r = self.sessions.read().await;
+            sessions_r.keys().cloned().collect()
+        };
         let mut sessions = self.sessions.write().await;
         for session in sessions.values_mut() {
             session.close();
         }
         sessions.clear();
+        drop(sessions);
+        for idcode in live {
+            let _ = self.event_tx.send(PmuEvent::SessionDisconnected { idcode });
+        }
         info!("MasterStation stopped");
     }
 
@@ -1175,7 +1189,12 @@ impl MasterStation {
                     let _ = writer.flush().await;
                 }
                 session.cfg2 = Some(cfg2);
-                session.state = SessionState::Cfg2Sent;
+                // Mid-stream rate change pushes a fresh CFG-2 without
+                // tearing down the data pipe — keep Streaming so the UI
+                // doesn't bounce back to "已下传 CFG-2".
+                if session.state != SessionState::Streaming {
+                    session.state = SessionState::Cfg2Sent;
+                }
             }
         }
 
