@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f8cd0"/>
+      <stop offset="0.55" stop-color="#2b5a99"/>
+      <stop offset="1" stop-color="#173763"/>
+    </linearGradient>
+    <radialGradient id="hi" cx="0.5" cy="0" r="0.95">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="vglow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="softshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="4" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#hi)"/>
+
+  <g transform="translate(512 512)">
+    <!-- single outer ring, thick enough to read at 32px -->
+    <circle r="360" fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="14"/>
+    <!-- 4 quadrant ticks only (cardinal) — clean even at 32px -->
+    <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round">
+      <line x1="0" y1="-360" x2="0" y2="-320"/>
+      <line x1="360" y1="0" x2="320" y2="0"/>
+      <line x1="0" y1="360" x2="0" y2="320"/>
+      <line x1="-360" y1="0" x2="-320" y2="0"/>
+    </g>
+
+    <!-- 3 phasor vectors, thick, with soft glow halo and arrowhead.
+         Geometry: each vector points 120° apart starting from +x rotated by -90°
+         so they read as "upward" balanced.  Lengths ~310 to fit inside ring.
+
+         Phase A: angle = -60° from +x (so points up-right)
+           tip = (310*cos(-60°), 310*sin(-60°)) = (155, -268.5)
+         Phase B: angle = -180° (points left) — but we want up-left:
+           use -120° → tip = (310*cos(-120°), 310*sin(-120°)) = (-155, -268.5)
+         Phase C: angle = 90° → tip = (0, 310)
+    -->
+
+    <!-- Phase A (red) tip (155, -268.5) -->
+    <g filter="url(#vglow)" opacity="0.55">
+      <line x1="0" y1="0" x2="155" y2="-268.5" stroke="#ff8050" stroke-width="36" stroke-linecap="round"/>
+    </g>
+    <line x1="0" y1="0" x2="155" y2="-268.5" stroke="#ff5a2e" stroke-width="28" stroke-linecap="round"/>
+    <!-- Arrowhead A: triangle perpendicular to direction.
+         direction = (155,-268.5)/310 = (0.5, -0.866).  perp = (0.866, 0.5).
+         tip = (190, -329).  base center = (155, -268.5).  -->
+    <polygon points="195,-337 100,-298 175,-235" fill="#ff5a2e"/>
+
+    <!-- Phase B (green) tip (-155, -268.5) -->
+    <g filter="url(#vglow)" opacity="0.55">
+      <line x1="0" y1="0" x2="-155" y2="-268.5" stroke="#7fd991" stroke-width="36" stroke-linecap="round"/>
+    </g>
+    <line x1="0" y1="0" x2="-155" y2="-268.5" stroke="#3fbf5f" stroke-width="28" stroke-linecap="round"/>
+    <polygon points="-195,-337 -100,-298 -175,-235" fill="#3fbf5f"/>
+
+    <!-- Phase C (gold) tip (0, 310) -->
+    <g filter="url(#vglow)" opacity="0.55">
+      <line x1="0" y1="0" x2="0" y2="310" stroke="#ffd56a" stroke-width="36" stroke-linecap="round"/>
+    </g>
+    <line x1="0" y1="0" x2="0" y2="310" stroke="#ffbe1e" stroke-width="28" stroke-linecap="round"/>
+    <polygon points="0,388 -55,300 55,300" fill="#ffbe1e"/>
+
+    <!-- center hub: white dot with dark core for crispness at small size -->
+    <circle r="40" fill="#ffffff"/>
+    <circle r="22" fill="#173763"/>
+  </g>
+</svg>
