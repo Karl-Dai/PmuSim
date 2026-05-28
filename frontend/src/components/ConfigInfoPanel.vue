@@ -8,6 +8,7 @@ import { useCommLog } from "../composables/useCommLog";
 import { useEventLog } from "../composables/useEventLog";
 import { useFrameRate } from "../composables/useFrameRate";
 import { useToast, toastError } from "../composables/useToast";
+import { listenerReady } from "../composables/usePmuEvents";
 
 const { protocol } = useProtocol();
 const { running } = useServerStatus();
@@ -90,6 +91,11 @@ async function startEverything() {
   if (busy.value) return;
   busy.value = true;
   try {
+    // Block until the Tauri event listener is attached. If start_server +
+    // connect_substation fire before listen() round-trips,every handshake
+    // event drops on the floor and the UI never updates (the original
+    // 已断开/无事件 bug).
+    await listenerReady;
     // 1. start server if not running
     if (!running.value) {
       const dataPort = protocol.value === "V3" ? 0 : parseInt(connDataPort.value);

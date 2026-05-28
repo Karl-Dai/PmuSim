@@ -1,13 +1,13 @@
 use pmusim_core::protocol::constants::ProtocolVersion;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 use tokio::sync::mpsc;
 
+use crate::events::PmuEvent;
 use crate::network::master::MasterStation;
 use crate::state::AppState;
 
 #[tauri::command]
 pub async fn start_server(
-    app_handle: AppHandle,
     state: State<'_, AppState>,
     data_port: u16,
     protocol: String,
@@ -22,18 +22,25 @@ pub async fn start_server(
         return Err("Server already running".into());
     }
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let forward_handle = app_handle.clone();
+    let buffer = state.events.clone();
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            if let Err(e) = forward_handle.emit("pmu-event", &event) {
-                log::error!("Failed to forward event: {e}");
-            }
+            buffer.push(event);
         }
     });
     let mut master = MasterStation::new(event_tx, data_port, 30.0, version);
     master.start().await?;
     *guard = Some(master);
     Ok(())
+}
+
+/// Drain all buffered events. Called by the frontend on a short interval
+/// (e.g. 100 ms) instead of relying on AppHandle::emit + JS listen(),
+/// which races webview-ready on macOS WebKit and can lose every event
+/// emitted during the handshake.
+#[tauri::command]
+pub fn poll_events(state: State<'_, AppState>) -> Vec<PmuEvent> {
+    state.events.drain()
 }
 
 #[tauri::command]

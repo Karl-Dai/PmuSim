@@ -14,6 +14,7 @@ fn main() {
             commands::send_command,
             commands::auto_handshake,
             commands::set_heartbeat_interval,
+            commands::poll_events,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PmuSim");

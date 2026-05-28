@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
-import { usePmuEvents } from "./composables/usePmuEvents";
 import { useToast } from "./composables/useToast";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
 
-const { startListening } = usePmuEvents();
+// PMU event listener is attached in main.ts BEFORE this component mounts
+// (see comment there) so we don't race the first connect_substation call.
 const { toasts, dismiss } = useToast();
-
-onMounted(() => {
-  startListening();
-});
 </script>
 
 <template>
