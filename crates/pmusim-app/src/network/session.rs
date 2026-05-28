@@ -27,6 +27,7 @@ pub struct SubStationSession {
     pub peer_ip: String,
     pub peer_host: String,
     pub peer_mgmt_port: u16,
+    pub peer_data_port: u16,
     pub state: SessionState,
 
     pub mgmt_reader: Option<OwnedReadHalf>,
@@ -50,6 +51,7 @@ impl SubStationSession {
             peer_ip: peer_ip.clone(),
             peer_host: peer_ip,
             peer_mgmt_port: 0,
+            peer_data_port: 0,
             state: SessionState::Connected,
             mgmt_reader: None,
             mgmt_writer: None,
