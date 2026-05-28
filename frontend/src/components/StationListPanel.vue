@@ -17,12 +17,12 @@ const busy = ref(false);
 
 const stationList = computed(() => Array.from(sessions.values()));
 
-// 协议切换时联动 mgmt + data 默认值(用户未编辑则跟随)
+// 协议切换时联动 mgmt + data 默认值 — 切协议视为新的配置上下文,
+// 复位 dirty 让数据端口重新跟随 mgmt+1
 watch(protocol, (p) => {
   connMgmtPort.value = p === "V2" ? "7000" : "8000";
-  if (!connDataPortDirty.value) {
-    connDataPort.value = p === "V2" ? "7001" : "8001";
-  }
+  connDataPortDirty.value = false;
+  connDataPort.value = p === "V2" ? "7001" : "8001";
 });
 
 // 命令端口手动改时,数据端口自动跟随 mgmt+1(除非用户编辑过 data)

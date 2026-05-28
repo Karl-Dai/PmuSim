@@ -18,8 +18,8 @@ watch(protocol, (p) => {
 
 async function start() {
   try {
-    // V3 模式后端会忽略 data_port,但 Tauri 命令签名仍要求 u16,传 0 不通过
-    // 这里照旧传值即可 — 后端 start() 按 protocol 分支处理
+    // V3 模式后端 start() 直接重置 self.data_port = 0 并跳过 bind,
+    // 这里传任何 u16 都行 — 用 0 表明"无意义"; V2 传用户填的侦听端口
     const dataPort = protocol.value === "V3" ? 0 : parseInt(localListenPort.value);
     await invoke("start_server", { dataPort, protocol: protocol.value });
     running.value = true;

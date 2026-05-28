@@ -377,11 +377,19 @@ async fn v3_auto_handshake_from_tmp_id_reaches_streaming() {
 #[tokio::test]
 async fn v3_handshake_with_explicit_data_port() {
     // Bind mgmt + a NON-adjacent data port (mgmt + 10) so the master must
-    // use the explicit data_port argument, not the mgmt+1 default.
-    let mgmt_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mgmt_port = mgmt_listener.local_addr().unwrap().port();
-    let custom_data_port = mgmt_port.checked_add(10).expect("port + 10");
-    let data_listener = TcpListener::bind(("127.0.0.1", custom_data_port)).await.unwrap();
+    // use the explicit data_port argument, not the mgmt+1 default. Retry
+    // until both ports are free so this test doesn't flake under parallel
+    // execution where another test's spawn_mock_substation might have
+    // already taken mgmt_port + 10.
+    let (mgmt_listener, mgmt_port, data_listener, custom_data_port) = loop {
+        let m = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let p = m.local_addr().unwrap().port();
+        let Some(dp) = p.checked_add(10) else { continue };
+        match TcpListener::bind(("127.0.0.1", dp)).await {
+            Ok(d) => break (m, p, d, dp),
+            Err(_) => continue,
+        }
+    };
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PmuEvent>();
     let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V3);
