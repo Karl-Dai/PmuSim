@@ -28,6 +28,7 @@ enum MasterCmd {
     Connect {
         host: String,
         port: u16,
+        data_port: u16,        // 0 = use mgmt+1 default
         version: ProtocolVersion,
     },
     RequestCfg1 {
@@ -150,13 +151,15 @@ impl MasterStation {
     pub async fn connect_to_substation(
         &self,
         host: String,
-        port: u16,
+        mgmt_port: u16,
+        data_port: u16,
         version: ProtocolVersion,
     ) -> Result<(), String> {
         self.cmd_tx
             .send(MasterCmd::Connect {
                 host,
-                port,
+                port: mgmt_port,
+                data_port,
                 version,
             })
             .await
@@ -372,8 +375,8 @@ impl MasterStation {
     ) {
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
-                MasterCmd::Connect { host, port, version } => {
-                    Self::do_connect(host, port, version, sessions.clone(), event_tx.clone()).await;
+                MasterCmd::Connect { host, port, data_port, version } => {
+                    Self::do_connect(host, port, data_port, version, sessions.clone(), event_tx.clone()).await;
                 }
                 MasterCmd::RequestCfg1 { idcode } => {
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg1 as u16).await;
@@ -471,6 +474,7 @@ impl MasterStation {
     async fn do_connect(
         host: String,
         port: u16,
+        data_port: u16,
         version: ProtocolVersion,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
@@ -514,6 +518,11 @@ impl MasterStation {
             let mut placeholder = SubStationSession::new(tmp_id.clone(), version, host.clone());
             placeholder.peer_host = host.clone();
             placeholder.peer_mgmt_port = port;
+            placeholder.peer_data_port = if data_port == 0 {
+                port.saturating_add(1)
+            } else {
+                data_port
+            };
             // No reader/writer yet — the TCP connect hasn't returned.
             sessions_w.insert(tmp_id.clone(), placeholder);
         }
