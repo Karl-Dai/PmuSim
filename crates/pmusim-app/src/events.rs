@@ -16,7 +16,11 @@ pub enum PmuEvent {
     Error { idcode: String, error: String },
 }
 
+// Match the TypeScript ConfigInfo type (camelCase). Without this rename,
+// `cfg.channelNames` etc. are undefined on the frontend and the data table
+// silently shows only the STAT rows even though CFG-2 arrived intact.
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigInfo {
     pub cfg_type: u8,
     pub version: u8,
