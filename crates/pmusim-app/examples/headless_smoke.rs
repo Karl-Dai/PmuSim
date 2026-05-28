@@ -1,9 +1,9 @@
 //! Headless smoke test: drives `MasterStation` directly, without Tauri.
 //!
 //! Usage:
-//!   cargo run -p pmusim-app --example headless_smoke -- [host] [port] [data_port]
+//!   cargo run -p pmusim-app --example headless_smoke -- [host] [mgmt_port] [v2_listen_port] [sub_data_port]
 //!
-//! Defaults: 10.15.48.12 8000 18001
+//! Defaults: 10.15.48.12 8000 18001 0   (sub_data_port=0 → use mgmt_port+1)
 //!
 //! Exercises:
 //!   * master.start() binds the data listener
