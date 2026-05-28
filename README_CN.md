@@ -137,6 +137,11 @@ cd ../crates/pmusim-app && cargo tauri build
 
 `cargo tauri build` 通过 `beforeBuildCommand` 自动触发前端构建。
 
+## 更新日志 / Changelog
+
+完整历史见 [CHANGELOG.md](CHANGELOG.md), 安装包与签名 updater manifest
+见 [GitHub Releases](https://github.com/Karl-Dai/PmuSim/releases)。
+
 ## 许可证
 
 MIT

@@ -126,8 +126,9 @@ function selectRow(idx: number) {
 .data-table-wrap {
   flex: 1;
   overflow: auto;
-  background: #fefef0; /* very light yellow, matches reference */
-  border: 1px solid #888;
+  background: #fefdf0;
+  border: 1px solid #8a8a82;
+  box-shadow: inset 1px 1px 0 rgba(0,0,0,0.03);
 }
 .data-table {
   width: 100%;
@@ -137,47 +138,61 @@ function selectRow(idx: number) {
 .data-table thead th {
   position: sticky;
   top: 0;
-  background: #d8d8c8;
+  background: linear-gradient(#dedccd, #cfcdbe);
   font-weight: 600;
-  color: #333;
-  padding: 6px 8px;
+  color: #2a2a2a;
+  padding: 7px 10px;
   text-align: left;
-  border-right: 1px solid #aaa;
-  border-bottom: 1px solid #888;
+  border-right: 1px solid #a8a89a;
+  border-bottom: 1px solid #8a8a82;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
-.data-table thead th:last-child {
-  border-right: none;
-}
+.data-table thead th:first-child { text-align: center; }
+.data-table thead th:last-child { border-right: none; }
+
 .data-table tbody td {
-  padding: 4px 8px;
-  border-right: 1px solid #d8d8b8;
-  border-bottom: 1px solid #e8e8c8;
-  font-family: ui-monospace, Menlo, monospace;
+  padding: 5px 10px;
+  border-right: 1px solid #e6e2c5;
+  border-bottom: 1px solid #ece8cf;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #1a1a1a;
+  height: 24px;
 }
+/* 序号列：等宽数字 + 居中 */
+.data-table tbody td:first-child {
+  text-align: center;
+  color: #777;
+}
+/* 名称列：用中文 sans，避免 monospace 把中文撑很宽 */
 .data-table tbody td:nth-child(2) {
-  font-family: -apple-system, "PingFang SC", sans-serif;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-.data-table tbody td:last-child {
-  border-right: none;
-}
-.data-table tbody tr {
-  cursor: pointer;
-}
-.data-table tbody tr:hover {
-  background: #f5f5d8;
-}
-.data-table tbody tr.selected {
-  background: #2a78d4;
+.data-table tbody td:last-child { border-right: none; }
+
+.data-table tbody tr { cursor: pointer; }
+.data-table tbody tr:nth-child(even) { background: rgba(0,0,0,0.015); }
+.data-table tbody tr:hover { background: #f5f3d8; }
+.data-table tbody tr.selected,
+.data-table tbody tr.selected:hover {
+  background: #2a6fc7;
   color: #fff;
 }
 .data-table tbody tr.selected td {
-  border-right-color: #1a58a4;
-  border-bottom-color: #1a58a4;
+  color: #fff;
+  border-right-color: #1c5aa8;
+  border-bottom-color: #1c5aa8;
 }
-.empty-row td {
-  color: #999;
+.data-table tbody tr.selected td:first-child { color: #cfe0f5; }
+
+.empty-row td,
+.empty-row td:first-child {
+  color: #9a9a8a;
   text-align: center;
   font-style: italic;
-  padding: 20px;
+  padding: 24px;
+  background: transparent;
+  border-right: none;
 }
 </style>

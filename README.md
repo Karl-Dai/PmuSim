@@ -144,6 +144,12 @@ cd ../crates/pmusim-app && cargo tauri build
 
 `cargo tauri build` invokes the frontend build automatically via `beforeBuildCommand`.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history; browse
+[GitHub Releases](https://github.com/Karl-Dai/PmuSim/releases) for installers
+and signed updater manifests.
+
 ## License
 
 MIT

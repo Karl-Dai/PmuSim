@@ -58,34 +58,71 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # createUpdaterArtifacts:true 时 tauri-bundler 会调用 tauri signer 给
+          # 每个 updater target 产物附 .sig。CI 必须能拿到私钥(GitHub Secrets)。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: crates/pmusim-app
           tagName: ${{ github.ref_name }}
           releaseName: 'PmuSim ${{ github.ref_name }}'
-          releaseBody: |
-            ## Downloads
-
-            **PmuSim** — PMU 主站模拟器 / PMU Master Station Simulator
-
-            | Platform | Asset pattern |
-            |----------|---------------|
-            | macOS (Apple Silicon) | `*_aarch64.dmg` |
-            | macOS (Intel) | `*_x64.dmg` |
-            | Linux (x64) | `*_amd64.deb` / `*_amd64.AppImage` |
-            | Windows (x64) | `*_x64-setup.exe` / `*_x64_en-US.msi` |
-          # Draft until all matrix jobs finish uploading; the `publish` job below
-          # flips the draft off once every platform's assets are attached.
+          # Keep the release a draft during the build: GitHub's
+          # `releases/latest` skips drafts, so existing users' update checks
+          # keep hitting the previous *complete* release. publish-manifest
+          # clears the draft flag once installers + manifest + body are all in.
           releaseDraft: true
           prerelease: false
+          # The project ships its own latest-pmusim*.json via
+          # gen-update-manifest; tauri-action's latest.json is unused. Being a
+          # single shared filename, every parallel matrix job clobbers it —
+          # the source of the flaky "delete-a-release-asset" 404 race. Skip it.
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
-  publish:
+  publish-manifest:
     needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Publish release
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Un-draft first: this job only runs once every build succeeded, so the
+      # release is now complete enough to go live. Publishing here (rather than
+      # last) lets the manifest scripts run against a normal published release
+      # — `releases/tags/<tag>` and public asset URLs all work. The residual
+      # window where `releases/latest` lacks the update manifest shrinks from
+      # the whole ~10-minute build to the few seconds of manifest generation.
+      - name: Publish release (clear draft flag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ github.ref_name }}" --draft=false --repo "${{ github.repository }}"
+        run: gh release edit ${{ github.ref_name }} --draft=false
+      - name: Install script deps
+        working-directory: scripts
+        run: npm install --no-audit --no-fund
+      - name: Generate manifests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/gen-update-manifest.mjs ${{ github.ref_name }}
+      - name: Upload manifests to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh release upload ${{ github.ref_name }} \
+              latest-pmusim.json latest-pmusim-cn1.json latest-pmusim-cn2.json latest-pmusim-cn3.json \
+              --clobber; then exit 0; fi
+            echo "::warning::manifest upload attempt $attempt failed, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::manifest upload failed after 5 attempts"; exit 1
+
+      - name: Render rich release body from CHANGELOG
+        run: node scripts/build-release-notes.mjs ${{ github.ref_name }}
+
+      - name: Replace release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit ${{ github.ref_name }} --notes-file RELEASE_BODY.md

@@ -1,0 +1,58 @@
+# Changelog
+
+All notable changes to PmuSim are documented in this file.
+
+The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.3.0] - 2026-05-28
+
+### Highlights / 亮点
+
+- 🔄 应用内自动更新: 启动静默检查 + 标题栏「检查更新」按钮; 6h 节流, 24h snooze 同版本 / In-app auto-update: silent check on startup + "检查更新" button in the title bar; 6h throttle, 24h snooze per version.
+- 🇨🇳 国内三镜像 + GitHub 四路回退, 直连失败也能装到最新版 / Four-way endpoint fallback (ghfast.top / gh-proxy.com / gh.idayer.com + GitHub) so mainland users still pick up updates when the direct GitHub link is blocked.
+- 🔐 GitHub Actions 用 minisign 签名 updater 产物, app 端验签后才安装 / Updater artifacts are minisign-signed in GitHub Actions; the app verifies signatures before installing — no MITM via the CN proxies.
+- 📝 Release body 自动从 CHANGELOG 渲染: 平台下载表 + 本版本变更 + macOS Gatekeeper 提示 / Release body now auto-renders from CHANGELOG via `scripts/build-release-notes.mjs` — platform download table, version section, and macOS Gatekeeper note all included.
+- 💄 配置/数据面板小幅 UI 收敛: label 去冒号, 端口字段加 `inputmode=numeric`, 速率/读回值并排 / Minor UI polish on the config & data panels: colons dropped from labels, port fields opt into numeric IME, sample-rate readback inlined next to the dropdown.
+
+### Added 新增
+
+- `tauri-plugin-updater` 接入, 新增 `check_for_update / install_update / snooze_update` 三个 command (`crates/pmusim-app/src/update.rs`) / Wired `tauri-plugin-updater`; new commands `check_for_update / install_update / snooze_update` (`crates/pmusim-app/src/update.rs`).
+- 标题栏「检查更新」按钮 + `UpdateDialog.vue` (markdown 渲染 + 进度条 + 错误重试) / Title-bar "检查更新" button + `UpdateDialog.vue` (lightweight markdown rendering, progress bar, retry-on-error).
+- `scripts/gen-update-manifest.mjs` + `scripts/build-release-notes.mjs`: 拉 release assets, 生成 4 份 `latest-pmusim{,-cn1,-cn2,-cn3}.json` updater manifest, 渲染富格式 release body / `scripts/gen-update-manifest.mjs` + `scripts/build-release-notes.mjs`: pull release assets, emit four `latest-pmusim{,-cn{1,2,3}}.json` updater manifests, render the rich release body.
+- `crates/pmusim-app/capabilities/default.json`: updater/process/store/dialog 权限 / `crates/pmusim-app/capabilities/default.json` granting updater/process/store/dialog permissions.
+
+### Changed 改进
+
+- `.github/workflows/release.yml`: 加 `TAURI_SIGNING_PRIVATE_KEY` env + `includeUpdaterJson: false`, 新增 `publish-manifest` job 跑 manifest 生成 + release body 渲染 / `.github/workflows/release.yml` now signs updater bundles (`TAURI_SIGNING_PRIVATE_KEY`), skips tauri-action's clobber-prone `latest.json`, and runs a new `publish-manifest` job to emit signed manifests and replace the release body.
+- `crates/pmusim-app/tauri.conf.json`: `createUpdaterArtifacts: true`, 配置 4 个 updater endpoints (CN proxy 优先, GitHub 兜底), 嵌入 minisign 公钥 / `crates/pmusim-app/tauri.conf.json` enables `createUpdaterArtifacts`, lists four updater endpoints (CN proxies first, GitHub last), embeds the minisign pubkey.
+- 版本号统一到 0.3.0 (Cargo.toml / tauri.conf.json / frontend/package.json 之前在 0.1.0 与 0.2.0 之间错位) / Version unified to 0.3.0 across Cargo.toml, tauri.conf.json and frontend/package.json (they had drifted between 0.1.0 and 0.2.0).
+- ConfigInfoPanel / DataTablePanel: label 去冒号, 端口字段 `inputmode=numeric`, 速率行加 `.ctl-with-suffix` 容器 / `ConfigInfoPanel` / `DataTablePanel`: colons removed from labels, port inputs use `inputmode="numeric"`, sample-rate row wrapped in `.ctl-with-suffix`.
+
+## [0.2.0] - 2026-04-16
+
+### Added
+- Vue 3 + TypeScript + Vite 前端脚手架, 实现 toolbar/stations/config/data/log 全部
+  面板; useProtocol 跨面板共享协议状态; useServerStatus/useToast composable.
+- Tauri 2 应用层 (`pmusim-app`): MasterStation tokio 网络层, 事件总线 (后端缓冲 +
+  前端轮询), 自动握手, V3 主站发起的数据通道 (GB/T 26865.2-2011).
+- `pmusim-core` 协议库: 帧解析/构建 (V2/V3), CommandFrame/ConfigFrame/DataFrame,
+  SOC/FRACSEC 时间转换工具.
+- 跨平台 release 工作流 (Tauri cross-platform build): macOS aarch64/x86_64,
+  Linux x64, Windows x64.
+- 端口配置重设计: V3 隐藏 data port (主站外联), V2 命名为「本地侦听端口」;
+  station 面板 mgmt/data 端口分列 + 自动跟随 + dirty tracking.
+- headless_smoke example 驱动 MasterStation 全链路 PMU 集成测试.
+
+### Fixed
+- ConfigInfo serde `rename_all = "camelCase"` 使 channelNames 正确落到前端.
+- 主站防重复连接竞态; 5s TCP 超时; 改用原子 pending 占位.
+- V2 CFG-2 downstream 类型修正; re-keyed session 正确跟随.
+- port-collision 重试测试; 协议切换重置 dataPort dirty 标志.
+
+## [0.1.0] - 2026-04-15
+
+### Added
+- 初始版本: PMU 协议核心库骨架, Tauri 应用占位, PyInstaller CI.

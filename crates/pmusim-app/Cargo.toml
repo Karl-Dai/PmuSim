@@ -1,7 +1,11 @@
 [package]
 name = "pmusim-app"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+
+[lib]
+name = "pmusim_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 pmusim-core = { path = "../pmusim-core" }
@@ -10,7 +14,12 @@ serde_json = "1.0"
 log = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-store = "2"
+tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

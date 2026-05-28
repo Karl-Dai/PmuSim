@@ -203,24 +203,26 @@ watch(rateHz, async (v) => {
     <fieldset>
       <legend>配置及运行信息</legend>
 
-      <div class="row"><label>子站地址:</label><input v-model="connIp" /></div>
-      <div class="row"><label>命令端口:</label><input v-model="connMgmtPort" /></div>
+      <div class="row"><label>子站地址</label><input v-model="connIp" /></div>
+      <div class="row"><label>命令端口</label><input v-model="connMgmtPort" inputmode="numeric" /></div>
       <div class="row" v-if="protocol === 'V3'">
-        <label>数据端口:</label><input :value="connDataPort" @input="onDataPortInput" />
+        <label>数据端口</label><input :value="connDataPort" @input="onDataPortInput" inputmode="numeric" />
       </div>
-      <div class="row"><label>IDCODE:</label><input :value="idcodeDisplay" readonly :class="{ readonly: true }" /></div>
+      <div class="row"><label>IDCODE</label><input :value="idcodeDisplay" readonly placeholder="待握手" /></div>
       <div class="row">
-        <label>速率:</label>
-        <select v-model="rateHz">
-          <option value="25">25 Hz</option>
-          <option value="50">50 Hz</option>
-          <option value="100">100 Hz</option>
-          <option value="200">200 Hz</option>
-        </select>
-        <span class="readback" v-if="ratePeriodReadback">({{ ratePeriodReadback }})</span>
+        <label>速率</label>
+        <div class="ctl-with-suffix">
+          <select v-model="rateHz">
+            <option value="25">25 Hz</option>
+            <option value="50">50 Hz</option>
+            <option value="100">100 Hz</option>
+            <option value="200">200 Hz</option>
+          </select>
+          <span class="readback">{{ ratePeriodReadback ? `(${ratePeriodReadback})` : "" }}</span>
+        </div>
       </div>
       <div class="row">
-        <label>心跳间隔:</label>
+        <label>心跳间隔</label>
         <select v-model="heartbeatSecs">
           <option value="1">1 秒</option>
           <option value="5">5 秒</option>
@@ -228,9 +230,9 @@ watch(rateHz, async (v) => {
           <option value="30">30 秒</option>
         </select>
       </div>
-      <div class="row"><label>通讯协议:</label><input value="TCP" disabled /></div>
+      <div class="row"><label>通讯协议</label><input value="TCP" disabled /></div>
       <div class="row">
-        <label>规约协议:</label>
+        <label>规约协议</label>
         <select v-model="protocol" :disabled="running">
           <option value="V2">2006 (V2)</option>
           <option value="V3">2011 (V3)</option>
@@ -238,16 +240,16 @@ watch(rateHz, async (v) => {
       </div>
 
       <div class="btn-grid">
-        <button class="btn" @click="startEverything" :disabled="busy || running">开 始</button>
-        <button class="btn" @click="stopEverything" :disabled="busy || !running">停 止</button>
-        <button class="btn" @click="pauseData" :disabled="!session || session.state !== 'streaming'">暂 停</button>
-        <button class="btn" @click="triggerCmd" :disabled="!session">触 发</button>
+        <button class="btn" @click="startEverything" :disabled="busy || running"><span>开始</span></button>
+        <button class="btn" @click="stopEverything" :disabled="busy || !running"><span>停止</span></button>
+        <button class="btn" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>暂停</span></button>
+        <button class="btn" @click="triggerCmd" :disabled="!session"><span>触发</span></button>
       </div>
 
       <div class="readout">
-        <div class="rd-row"><label>状态:</label><span>{{ stateLabel || "—" }}</span></div>
-        <div class="rd-row"><label>最新时间:</label><span class="mono">{{ latestTime }}</span></div>
-        <div class="rd-row"><label>上传速率:</label><span class="mono">{{ fps }} 帧/秒</span></div>
+        <div class="rd-row"><label>状态</label><span class="rd-val">{{ stateLabel || "—" }}</span></div>
+        <div class="rd-row"><label>最新时间</label><span class="rd-val mono">{{ latestTime }}</span></div>
+        <div class="rd-row"><label>上传速率</label><span class="rd-val mono">{{ fps }} <span class="unit">帧/秒</span></span></div>
       </div>
     </fieldset>
 
@@ -265,95 +267,234 @@ watch(rateHz, async (v) => {
 </template>
 
 <style scoped>
+/* Layout shell --------------------------------------------------------- */
 .config-panel {
-  width: 380px;
-  min-width: 380px;
+  width: 392px;
+  min-width: 392px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
   overflow: hidden;
 }
 fieldset {
-  border: 1px solid #888;
+  border: 1px solid #8a8a82;
   border-radius: 0;
-  padding: 8px 10px 10px 10px;
-  background: #f0f0f0;
+  padding: 10px 12px 12px;
+  background: #f2f1ea;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
 }
-fieldset legend { padding: 0 6px; font-weight: 600; color: #333; }
+fieldset legend {
+  padding: 0 6px;
+  font-weight: 600;
+  color: #333;
+  letter-spacing: 0.5px;
+}
 
+/* Form row — pixel-aligned label : control ---------------------------- */
 .row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  column-gap: 8px;
+  margin: 5px 0;
+  min-height: 24px;
+}
+/* When a row needs a trailing readback (e.g. 速率 → (100.0Hz)),
+   nest the control + readback in this wrapper so they share the same
+   1fr column and the box widths still align with other rows. */
+.ctl-with-suffix {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0;
+  min-width: 0;
 }
-.row label {
-  width: 78px;
+.ctl-with-suffix > select,
+.ctl-with-suffix > input { flex: 1; min-width: 0; }
+.row > label {
   text-align: right;
   color: #444;
   font-size: 13px;
+  line-height: 22px;
+  user-select: none;
 }
-.row input, .row select {
-  flex: 1;
-  padding: 3px 4px;
-  border: 1px solid #888;
-  background: white;
-  font-size: 13px;
-  font-family: ui-monospace, Menlo, monospace;
-}
-.row input.readonly, .row input[readonly], .row input:disabled, .row select:disabled {
-  background: #e8e8e8;
-  color: #555;
-}
-.row .readback {
-  font-size: 11px;
+/* Render the colon via ::after so spacing is consistent regardless of
+   label length (CJK vs ASCII have different intrinsic widths). */
+.row > label::after {
+  content: ":";
+  margin-left: 2px;
   color: #777;
-  margin-left: 4px;
-  font-family: ui-monospace, Menlo, monospace;
 }
 
+/* Inputs & selects share identical box metrics so vertical edges line
+   up across every row. appearance:none kills the macOS native select
+   chrome (rounded corners + chevron) that otherwise sits 1–2px taller
+   than the input boxes. */
+.row input,
+.row select {
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid #8a8a82;
+  background: #fff;
+  font-size: 13px;
+  line-height: 20px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgba(0,0,0,0.04);
+  outline: none;
+}
+.row input:focus,
+.row select:focus {
+  border-color: #4178c7;
+  box-shadow: inset 0 0 0 1px rgba(65,120,199,0.35);
+}
+.row input::placeholder { color: #aaa; font-style: italic; }
+
+/* Custom chevron — single SVG so disabled / enabled selects render
+   identically across platforms. */
+.row select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 22px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M0 0l5 6 5-6z' fill='%23555'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 8px 5px;
+  cursor: pointer;
+}
+.row input[readonly],
+.row input:disabled,
+.row select:disabled {
+  background-color: #e6e5dd;
+  color: #666;
+  cursor: not-allowed;
+}
+.row select:disabled {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M0 0l5 6 5-6z' fill='%23999'/></svg>");
+}
+
+.readback {
+  font-size: 11px;
+  color: #7a7a72;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  min-width: 56px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Buttons — even CJK letter-spacing without dangling whitespace ------ */
 .btn-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 14px;
 }
 .btn {
-  padding: 7px 0;
-  border: 1px solid #888;
-  background: linear-gradient(#f4f4f4, #d8d8d8);
+  height: 30px;
+  border: 1px solid #7a7a72;
+  background: linear-gradient(#f6f5ee, #d6d4c5);
   font-size: 14px;
   font-weight: 600;
+  color: #2a2a2a;
   cursor: pointer;
-  letter-spacing: 4px;
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7),
+              0 1px 0 rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.btn:hover:not(:disabled) { background: linear-gradient(#fff, #e0e0e0); }
-.btn:active:not(:disabled) { background: linear-gradient(#d0d0d0, #b8b8b8); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* CJK 字距：在 span 上写 letter-spacing 并用 padding-left 抵消尾部空白，
+   保证字符在按钮内视觉居中（letter-spacing 在最后一个字符后仍会加空）。 */
+.btn > span {
+  letter-spacing: 6px;
+  padding-left: 6px;
+}
+.btn:hover:not(:disabled) {
+  background: linear-gradient(#fffefb, #dedccd);
+  border-color: #4178c7;
+}
+.btn:active:not(:disabled) {
+  background: linear-gradient(#c4c2b3, #aaa89a);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: #888;
+}
 
+/* Readout — same label grid as form rows so columns line up ---------- */
 .readout {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed #aaa;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #b5b5ad;
 }
-.rd-row { display: flex; gap: 6px; margin: 3px 0; }
-.rd-row label { width: 78px; text-align: right; color: #444; font-size: 13px; }
-.rd-row span { font-size: 13px; color: #222; }
-.mono { font-family: ui-monospace, Menlo, monospace; }
+.rd-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+  margin: 4px 0;
+}
+.rd-row > label {
+  text-align: right;
+  color: #555;
+  font-size: 13px;
+}
+.rd-row > label::after {
+  content: ":";
+  margin-left: 2px;
+  color: #888;
+}
+.rd-val {
+  font-size: 13px;
+  color: #1a1a1a;
+  font-variant-numeric: tabular-nums;
+}
+.rd-val .unit {
+  color: #777;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin-left: 2px;
+  font-size: 12px;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 
-.log-fs { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+/* Event log ---------------------------------------------------------- */
+.log-fs {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+}
 .log-list {
   flex: 1;
   overflow: auto;
-  background: white;
-  border: 1px solid #ccc;
+  background: #fffef8;
+  border: 1px solid #b5b5ad;
+  box-shadow: inset 1px 1px 0 rgba(0,0,0,0.04);
   padding: 4px 6px;
   font-size: 12px;
-  font-family: ui-monospace, Menlo, monospace;
+  line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
-.log-line { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-line {
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #333;
+}
 .log-line.error { color: #b91c1c; }
-.log-time { color: #666; margin-right: 6px; }
-.log-empty { color: #999; text-align: center; padding: 8px; }
+.log-time { color: #888; margin-right: 8px; font-variant-numeric: tabular-nums; }
+.log-empty {
+  color: #aaa;
+  text-align: center;
+  padding: 12px;
+  font-style: italic;
+}
 </style>

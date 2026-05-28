@@ -1,16 +1,59 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "./composables/useToast";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
+import UpdateDialog from "./components/UpdateDialog.vue";
 
 // PMU event listener is attached in main.ts BEFORE this component mounts
 // (see comment there) so we don't race the first connect_substation call.
-const { toasts, dismiss } = useToast();
+const { toasts, dismiss, push } = useToast();
+
+type UpdateMeta = { version: string; notes: string; pub_date?: string | null };
+const updateMeta = ref<UpdateMeta | null>(null);
+const updateVisible = ref(false);
+const checking = ref(false);
+
+async function checkUpdate(force = false) {
+  if (checking.value) return;
+  checking.value = true;
+  try {
+    const meta = await invoke<UpdateMeta | null>("check_for_update", { force });
+    if (meta) {
+      updateMeta.value = meta;
+      updateVisible.value = true;
+    } else if (force) {
+      push("当前已是最新版本", "info");
+    }
+  } catch (e) {
+    if (force) push(`检查更新失败: ${e}`, "error");
+    else console.warn("auto update check failed", e);
+  } finally {
+    checking.value = false;
+  }
+}
+
+function onSnooze() {
+  if (updateMeta.value) {
+    invoke("snooze_update", { version: updateMeta.value.version }).catch(() => {});
+  }
+}
+
+onMounted(() => {
+  // Auto-check on startup; silent on failure / already-latest.
+  checkUpdate(false);
+});
 </script>
 
 <template>
   <div class="app">
-    <div class="title-bar">simpmufep — PMU 主站模拟器</div>
+    <div class="title-bar">
+      <span>simpmufep — PMU 主站模拟器</span>
+      <button class="check-btn" :disabled="checking" @click="checkUpdate(true)">
+        {{ checking ? "检查中…" : "检查更新" }}
+      </button>
+    </div>
     <div class="content">
       <ConfigInfoPanel />
       <DataTablePanel />
@@ -21,25 +64,63 @@ const { toasts, dismiss } = useToast();
         {{ t.message }}
       </div>
     </div>
+
+    <UpdateDialog
+      :visible="updateVisible"
+      :version="updateMeta?.version ?? ''"
+      :notes="updateMeta?.notes ?? ''"
+      @close="updateVisible = false"
+      @snooze="onSnooze"
+    />
   </div>
 </template>
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; }
-.app { display: flex; flex-direction: column; height: 100vh; background: #d0d0c8; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #d4d2c5;
+}
 .title-bar {
   background: linear-gradient(#5a8ccc, #2c5a99);
-  color: white;
-  padding: 4px 10px;
+  color: #fff;
+  padding: 5px 12px;
   font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.3px;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.25);
+  border-bottom: 1px solid #1a467a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
+.check-btn {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+  text-shadow: none;
+}
+.check-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); }
+.check-btn:disabled { opacity: 0.6; cursor: default; }
 .content {
   flex: 1;
   display: flex;
-  gap: 6px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
   overflow: hidden;
 }
 
