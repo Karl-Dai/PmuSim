@@ -473,3 +473,21 @@ async fn v3_handshake_with_explicit_data_port() {
     master.stop().await;
     mock_task.abort();
 }
+
+#[tokio::test]
+async fn v3_start_does_not_bind_local_data_port() {
+    let (event_tx, _event_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V3);
+    master.start().await.unwrap();
+    assert_eq!(master.data_port, 0, "V3 master must not bind a local data listener");
+    master.stop().await;
+}
+
+#[tokio::test]
+async fn v2_start_still_binds_local_data_port() {
+    let (event_tx, _event_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V2);
+    master.start().await.unwrap();
+    assert!(master.data_port != 0, "V2 master must bind a real local data listener");
+    master.stop().await;
+}

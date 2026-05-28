@@ -90,26 +90,32 @@ impl MasterStation {
         }
     }
 
-    /// Start the data TCP listener, command loop, and heartbeat loop.
+    /// Start the data TCP listener (V2 only), command loop, and heartbeat loop.
+    /// V3 (master = data client) skips the listener; data_port is reset to 0.
     pub async fn start(&mut self) -> Result<(), String> {
-        let listener = TcpListener::bind(("0.0.0.0", self.data_port))
-            .await
-            .map_err(|e| format!("Failed to bind data port {}: {e}", self.data_port))?;
+        match self.protocol {
+            ProtocolVersion::V2 => {
+                let listener = TcpListener::bind(("0.0.0.0", self.data_port))
+                    .await
+                    .map_err(|e| format!("Failed to bind data port {}: {e}", self.data_port))?;
+                self.data_port = listener
+                    .local_addr()
+                    .map(|a| a.port())
+                    .unwrap_or(self.data_port);
 
-        // Update port in case 0 was used (OS-assigned).
-        self.data_port = listener
-            .local_addr()
-            .map(|a| a.port())
-            .unwrap_or(self.data_port);
+                info!("MasterStation started (V2), data listener on port {}", self.data_port);
 
-        info!("MasterStation started, data server on port {}", self.data_port);
-
-        // Spawn data listener task.
-        let sessions = self.sessions.clone();
-        let handle = self.event_tx.clone();
-        self.tasks.push(tokio::spawn(async move {
-            Self::data_listener_loop(listener, sessions, handle).await;
-        }));
+                let sessions = self.sessions.clone();
+                let handle = self.event_tx.clone();
+                self.tasks.push(tokio::spawn(async move {
+                    Self::data_listener_loop(listener, sessions, handle).await;
+                }));
+            }
+            ProtocolVersion::V3 => {
+                self.data_port = 0;
+                info!("MasterStation started (V3), no local data listener (master-outbound only)");
+            }
+        }
 
         // Spawn command loop.
         let cmd_rx = self
