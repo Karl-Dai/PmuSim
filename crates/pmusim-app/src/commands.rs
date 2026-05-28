@@ -51,11 +51,14 @@ pub async fn connect_substation(
     state: State<'_, AppState>,
     host: String,
     port: u16,
+    data_port: Option<u16>,
 ) -> Result<(), String> {
     let guard = state.master.lock().await;
     let master = guard.as_ref().ok_or("Server not running")?;
     let version = master.protocol;
-    master.connect_to_substation(host, port, 0, version).await
+    master
+        .connect_to_substation(host, port, data_port.unwrap_or(0), version)
+        .await
 }
 
 #[tauri::command]
