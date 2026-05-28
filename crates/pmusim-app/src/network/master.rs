@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use pmusim_core::protocol::builder::{build_command, build_config};
 use pmusim_core::protocol::constants::{
-    default_ports, Cmd, FrameType, ProtocolVersion, IDCODE_LEN, SYNC_BYTE,
+    Cmd, FrameType, ProtocolVersion, IDCODE_LEN, SYNC_BYTE,
 };
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, Frame};
 use pmusim_core::protocol::parser::parse;
@@ -645,17 +645,11 @@ impl MasterStation {
             let Some(s) = sessions_r.get(idcode) else {
                 return false; // session vanished — don't proceed with OpenData
             };
-            // Substation data port = mgmt port + 1 by GB/T 26865.2 convention
-            // (8000/8001 for V3, 7000/7001 for V2). Falls back to the default
-            // table only if mgmt port is 0 (e.g. OS-assigned).
-            let data_port = if s.peer_mgmt_port == 0 {
-                default_ports(s.version).1
-            } else {
-                s.peer_mgmt_port.saturating_add(1)
-            };
+            // peer_data_port was populated in do_connect; explicit override
+            // wins, otherwise it's mgmt_port + 1 by GB/T 26865.2 convention.
             (
                 s.peer_host.clone(),
-                data_port,
+                s.peer_data_port,
                 s.version,
                 s.data_connected(),
             )

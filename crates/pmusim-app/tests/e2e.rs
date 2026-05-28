@@ -226,7 +226,7 @@ async fn v3_full_handshake_streams_data() {
     let (mock_port, mock_task, obs) = spawn_mock_substation(master_data_port).await;
 
     master
-        .connect_to_substation("127.0.0.1".into(), mock_port, ProtocolVersion::V3)
+        .connect_to_substation("127.0.0.1".into(), mock_port, 0, ProtocolVersion::V3)
         .await
         .unwrap();
 
@@ -330,7 +330,7 @@ async fn v3_auto_handshake_from_tmp_id_reaches_streaming() {
     let (mock_port, mock_task, _obs) = spawn_mock_substation(master_data_port).await;
 
     master
-        .connect_to_substation("127.0.0.1".into(), mock_port, ProtocolVersion::V3)
+        .connect_to_substation("127.0.0.1".into(), mock_port, 0, ProtocolVersion::V3)
         .await
         .unwrap();
 
@@ -370,6 +370,106 @@ async fn v3_auto_handshake_from_tmp_id_reaches_streaming() {
         assert_eq!(idcode, IDCODE);
     }
 
+    master.stop().await;
+    mock_task.abort();
+}
+
+#[tokio::test]
+async fn v3_handshake_with_explicit_data_port() {
+    // Bind mgmt + a NON-adjacent data port (mgmt + 10) so the master must
+    // use the explicit data_port argument, not the mgmt+1 default.
+    let mgmt_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mgmt_port = mgmt_listener.local_addr().unwrap().port();
+    let custom_data_port = mgmt_port.checked_add(10).expect("port + 10");
+    let data_listener = TcpListener::bind(("127.0.0.1", custom_data_port)).await.unwrap();
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V3);
+    master.start().await.unwrap();
+
+    // Reuse the mock substation body — accepts mgmt, replies to handshake,
+    // serves data on whichever port the master happens to dial.
+    let obs: ObsHandle = Arc::new(Mutex::new(MockObservations::default()));
+    let obs_for_task = obs.clone();
+    let mock_task = tokio::spawn(async move {
+        let (stream, _) = mgmt_listener.accept().await.unwrap();
+        let (mut reader, mut writer) = stream.into_split();
+        let mut data_writer: Option<tokio::net::tcp::OwnedWriteHalf> = None;
+        let (data_tx, mut data_rx) =
+            mpsc::unbounded_channel::<tokio::net::tcp::OwnedWriteHalf>();
+        tokio::spawn(async move {
+            if let Ok((s, _)) = data_listener.accept().await {
+                let (_, dw) = s.into_split();
+                let _ = data_tx.send(dw);
+            }
+        });
+        loop {
+            let frame_data = match read_one_frame(&mut reader).await {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+            match parse(&frame_data, 0, 0, 0) {
+                Ok(Frame::Command(cmd)) => match cmd.cmd {
+                    c if c == Cmd::SendCfg1 as u16 => {
+                        writer.write_all(&build_config(&make_cfg(FrameType::Cfg1 as u8)).unwrap()).await.unwrap();
+                    }
+                    c if c == Cmd::SendCfg2Cmd as u16 => {
+                        writer.write_all(&ack_command()).await.unwrap();
+                    }
+                    c if c == Cmd::SendCfg2 as u16 => {
+                        writer.write_all(&build_config(&make_cfg(FrameType::Cfg2 as u8)).unwrap()).await.unwrap();
+                    }
+                    c if c == Cmd::OpenData as u16 => {
+                        if data_writer.is_none() {
+                            data_writer = data_rx.recv().await;
+                        }
+                        let bytes = build_data(&make_data_frame(0x67A99D11), 0, 2, 1).unwrap();
+                        if let Some(dw) = data_writer.as_mut() {
+                            dw.write_all(&bytes).await.unwrap();
+                        }
+                    }
+                    _ => {}
+                },
+                Ok(Frame::Config(cfg)) => {
+                    obs_for_task.lock().await.received_cfg_types.push(cfg.cfg_type);
+                    writer.write_all(&ack_command()).await.unwrap();
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Connect with EXPLICIT non-default data_port
+    master
+        .connect_to_substation(
+            "127.0.0.1".into(),
+            mgmt_port,
+            custom_data_port,
+            ProtocolVersion::V3,
+        )
+        .await
+        .unwrap();
+
+    let tmp_id = match wait_event(&mut event_rx, |e| {
+        matches!(e, PmuEvent::SessionCreated { .. })
+    })
+    .await
+    {
+        PmuEvent::SessionCreated { idcode, .. } => idcode,
+        _ => unreachable!(),
+    };
+    master.auto_handshake(tmp_id, None).await.unwrap();
+
+    // Walk through to a DataFrame to prove the master dialed the custom data port.
+    let _ = wait_event(&mut event_rx, |e| matches!(e, PmuEvent::Cfg2Sent { .. })).await;
+    let _ = wait_event(&mut event_rx, |e| matches!(e, PmuEvent::Cfg2Received { .. })).await;
+    let _ = wait_event(&mut event_rx, |e| matches!(e, PmuEvent::StreamingStarted { .. })).await;
+    let data_event = wait_event(&mut event_rx, |e| matches!(e, PmuEvent::DataFrame { .. })).await;
+    if let PmuEvent::DataFrame { idcode, .. } = data_event {
+        assert_eq!(idcode, IDCODE);
+    }
+
+    let _ = obs;
     master.stop().await;
     mock_task.abort();
 }
