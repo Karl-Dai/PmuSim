@@ -4,10 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useSessions } from "../composables/useSessions";
 import { useToast, toastError } from "../composables/useToast";
 import { useProtocol } from "../composables/useProtocol";
+import { useServerStatus } from "../composables/useServerStatus";
 
 const { sessions, selectedIdcode, removeSession } = useSessions();
 const { push: pushToast } = useToast();
 const { protocol } = useProtocol();
+const { running } = useServerStatus();
 const connIp = ref("127.0.0.1");
 const connMgmtPort = ref("8000");
 const connDataPort = ref("8001");
@@ -45,6 +47,13 @@ function selectStation(idcode: string) {
 
 async function connect() {
   if (busy.value) return;
+  if (!running.value) {
+    // Without this guard, clicking 连接 before 启动 fires a connect_substation
+    // command that the Rust side rejects with "Server not running" — once per
+    // click. Easy to misread as a network problem.
+    pushToast("请先点击工具栏「启动」", "error");
+    return;
+  }
   busy.value = true;
   const host = connIp.value;
   const mgmt = parseInt(connMgmtPort.value);
@@ -111,7 +120,9 @@ async function sendCmd(cmd: string) {
         <label>数据端口:</label>
         <input :value="connDataPort" @input="onDataPortInput" style="width:60px" :placeholder="String(parseInt(connMgmtPort) + 1)" />
       </div>
-      <button class="full-btn" :disabled="busy" @click="connect">{{ busy ? '连接中…' : '连接' }}</button>
+      <button class="full-btn" :disabled="busy || !running" @click="connect" :title="!running ? '请先点击工具栏「启动」' : ''">
+        {{ busy ? '连接中…' : (running ? '连接' : '连接 (未启动)') }}
+      </button>
       <button class="full-btn" :disabled="!selectedIdcode" @click="disconnect">断开所选</button>
     </fieldset>
 

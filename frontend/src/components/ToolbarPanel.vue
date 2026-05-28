@@ -3,13 +3,14 @@ import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast, toastError } from "../composables/useToast";
 import { useProtocol } from "../composables/useProtocol";
+import { useServerStatus } from "../composables/useServerStatus";
 
 const { push: pushToast } = useToast();
 const { protocol } = useProtocol();
+const { running } = useServerStatus();
 
 // V2 only: master 本地侦听端口(子站会主动连这里上送数据)
 const localListenPort = ref("8001");
-const running = ref(false);
 
 watch(protocol, (p) => {
   // V2 默认 7001, V3 默认 8001(虽然 V3 不会用,但留个合理值)
