@@ -1,17 +1,43 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessions } from "../composables/useSessions";
 import { useToast, toastError } from "../composables/useToast";
+import { useProtocol } from "../composables/useProtocol";
 
 const { sessions, selectedIdcode, removeSession } = useSessions();
 const { push: pushToast } = useToast();
+const { protocol } = useProtocol();
 const connIp = ref("127.0.0.1");
-const connPort = ref("8000");
+const connMgmtPort = ref("8000");
+const connDataPort = ref("8001");
+const connDataPortDirty = ref(false);
 const period = ref("");
 const busy = ref(false);
 
 const stationList = computed(() => Array.from(sessions.values()));
+
+// 协议切换时联动 mgmt + data 默认值(用户未编辑则跟随)
+watch(protocol, (p) => {
+  connMgmtPort.value = p === "V2" ? "7000" : "8000";
+  if (!connDataPortDirty.value) {
+    connDataPort.value = p === "V2" ? "7001" : "8001";
+  }
+});
+
+// 命令端口手动改时,数据端口自动跟随 mgmt+1(除非用户编辑过 data)
+watch(connMgmtPort, (newMgmt) => {
+  if (!connDataPortDirty.value) {
+    const m = parseInt(newMgmt);
+    if (Number.isFinite(m)) connDataPort.value = String(m + 1);
+  }
+});
+
+function onDataPortInput(e: Event) {
+  // 用户手动编辑 → 锁定为用户值
+  connDataPortDirty.value = true;
+  connDataPort.value = (e.target as HTMLInputElement).value;
+}
 
 function selectStation(idcode: string) {
   selectedIdcode.value = idcode;
@@ -21,18 +47,12 @@ async function connect() {
   if (busy.value) return;
   busy.value = true;
   const host = connIp.value;
-  const port = parseInt(connPort.value);
-  const target = `${host}:${port}`;
+  const mgmt = parseInt(connMgmtPort.value);
+  const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
+  const target = `${host}:${mgmt}`;
   const p = period.value ? parseInt(period.value) : null;
   try {
-    await invoke("connect_substation", { host, port });
-    // Chain auto_handshake against the placeholder idcode. The backend
-    // command_loop is single-threaded and serial: do_connect inserts the
-    // placeholder + finishes TCP first, then do_auto_handshake follows
-    // the session through the re-key by (peer_host, peer_port). Without
-    // this chain the user has to remember to click 一键握手 manually,
-    // and the connect itself stays idle — substation accepts mgmt then
-    // its Bus queue piles up forever waiting on us.
+    await invoke("connect_substation", { host, port: mgmt, dataPort: data });
     await invoke("auto_handshake", { idcode: target, period: p });
   } catch (e) {
     pushToast(`连接失败: ${toastError(e)}`, "error");
@@ -86,7 +106,11 @@ async function sendCmd(cmd: string) {
     <fieldset>
       <legend>连接子站</legend>
       <div class="form-row"><label>IP:</label><input v-model="connIp" style="width:110px" /></div>
-      <div class="form-row"><label>端口:</label><input v-model="connPort" style="width:60px" /></div>
+      <div class="form-row"><label>命令端口:</label><input v-model="connMgmtPort" style="width:60px" /></div>
+      <div class="form-row" v-if="protocol === 'V3'">
+        <label>数据端口:</label>
+        <input :value="connDataPort" @input="onDataPortInput" style="width:60px" :placeholder="String(parseInt(connMgmtPort) + 1)" />
+      </div>
       <button class="full-btn" :disabled="busy" @click="connect">{{ busy ? '连接中…' : '连接' }}</button>
       <button class="full-btn" :disabled="!selectedIdcode" @click="disconnect">断开所选</button>
     </fieldset>
