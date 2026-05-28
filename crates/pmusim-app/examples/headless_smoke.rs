@@ -71,7 +71,10 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let host = args.next().unwrap_or_else(|| "10.15.48.12".to_string());
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(8000);
+    // 第 3 个参数: V2 master 本地侦听端口;V3 模式下被 start() 忽略
     let data_port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(18001);
+    // 第 4 个参数(可选): 子站数据端口;省略时走 mgmt+1 默认
+    let sub_data_port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let protocol = ProtocolVersion::V3;
     let placeholder = format!("{host}:{port}");
 
@@ -98,7 +101,7 @@ async fn main() {
         ts()
     );
     match master
-        .connect_to_substation(host.clone(), port, protocol)
+        .connect_to_substation(host.clone(), port, sub_data_port, protocol)
         .await
     {
         Ok(()) => println!("queued"),
@@ -114,7 +117,7 @@ async fn main() {
         ts()
     );
     match master
-        .connect_to_substation(host.clone(), port, protocol)
+        .connect_to_substation(host.clone(), port, sub_data_port, protocol)
         .await
     {
         Ok(()) => println!("queued"),
