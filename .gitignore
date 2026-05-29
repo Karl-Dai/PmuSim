@@ -44,3 +44,5 @@ frontend/dist/
 
 # Tooling
 .playwright-mcp/
+.claude/worktrees/
+.worktrees/
