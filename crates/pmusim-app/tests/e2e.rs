@@ -115,6 +115,17 @@ fn ack_command() -> Vec<u8> {
     .unwrap()
 }
 
+fn nack_command() -> Vec<u8> {
+    build_command(&CommandFrame {
+        version: ProtocolVersion::V3,
+        idcode: IDCODE.into(),
+        soc: 0,
+        fracsec: 0,
+        cmd: Cmd::Nack as u16,
+    })
+    .unwrap()
+}
+
 /// Records every CFG frame the mock substation receives from the master.
 #[derive(Default)]
 struct MockObservations {
@@ -478,6 +489,67 @@ async fn v3_handshake_with_explicit_data_port() {
     }
 
     let _ = obs;
+    master.stop().await;
+    mock_task.abort();
+}
+
+/// When the substation NACKs the SendCfg2Cmd, the master must abort the
+/// handshake before sending CFG-2 / OpenData and surface an Error event —
+/// not silently proceed (which it did before pending_ack was added).
+#[tokio::test]
+async fn v3_nack_on_send_cfg2_cmd_aborts_handshake() {
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V3);
+    master.start().await.unwrap();
+
+    let mgmt_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mgmt_port = mgmt_listener.local_addr().unwrap().port();
+
+    let mock_task = tokio::spawn(async move {
+        let (stream, _) = mgmt_listener.accept().await.unwrap();
+        let (mut reader, mut writer) = stream.into_split();
+        loop {
+            let frame_data = match read_one_frame(&mut reader).await {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+            if let Ok(Frame::Command(cmd)) = parse(&frame_data, 0, 0, 0) {
+                if cmd.cmd == Cmd::SendCfg1 as u16 {
+                    writer.write_all(&build_config(&make_cfg(FrameType::Cfg1 as u8)).unwrap()).await.unwrap();
+                } else if cmd.cmd == Cmd::SendCfg2Cmd as u16 {
+                    // NACK instead of ACK. Master must NOT proceed.
+                    writer.write_all(&nack_command()).await.unwrap();
+                } else if cmd.cmd == Cmd::SendCfg2 as u16 {
+                    panic!("master sent召唤CFG-2 despite NACK on SendCfg2Cmd");
+                } else if cmd.cmd == Cmd::OpenData as u16 {
+                    panic!("master sent OpenData despite NACK on SendCfg2Cmd");
+                }
+            }
+        }
+    });
+
+    master
+        .connect_to_substation("127.0.0.1".into(), mgmt_port, 0, ProtocolVersion::V3)
+        .await
+        .unwrap();
+    let tmp_id = match wait_event(&mut event_rx, |e| matches!(e, PmuEvent::SessionCreated { .. })).await {
+        PmuEvent::SessionCreated { idcode, .. } => idcode,
+        _ => unreachable!(),
+    };
+    master.auto_handshake(tmp_id, None).await.unwrap();
+
+    // Expect an Error event mentioning NACK; must arrive within 5s.
+    let err = wait_event(&mut event_rx, |e| {
+        matches!(e, PmuEvent::Error { error, .. } if error.contains("NACK"))
+    })
+    .await;
+    if let PmuEvent::Error { error, .. } = err {
+        assert!(error.contains("NACK"), "expected NACK error, got: {error}");
+    }
+
+    // Give the mock a brief grace period to assert no further frames.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
     master.stop().await;
     mock_task.abort();
 }

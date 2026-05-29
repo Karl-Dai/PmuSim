@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use pmusim_core::protocol::constants::ProtocolVersion;
 use pmusim_core::protocol::frame::ConfigFrame;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::oneshot;
 
 /// Process-wide monotonic counter for session UIDs. Never reused, so a
 /// background task spawned for session N can detect that the slot at its
@@ -40,6 +41,14 @@ pub struct SubStationSession {
 
     pub last_heartbeat: std::time::Instant,
     pub missed_heartbeats: u32,
+
+    /// One-shot channel installed by a handshake step that must wait for
+    /// the substation's reply CMD (ACK=0xE000 / NACK=0x2000) before
+    /// proceeding. `process_mgmt_frame` consumes it on the next command
+    /// frame and reports the cmd word back to the waiter. Per V3 §8.4 /
+    /// §8.6 — without this we used fixed `sleep(500ms)` and silently
+    /// proceeded even when the substation NACK'd the CFG-2.
+    pub pending_ack: Option<oneshot::Sender<u16>>,
 }
 
 impl SubStationSession {
@@ -61,6 +70,7 @@ impl SubStationSession {
             cfg2: None,
             last_heartbeat: std::time::Instant::now(),
             missed_heartbeats: 0,
+            pending_ack: None,
         }
     }
 
@@ -78,6 +88,9 @@ impl SubStationSession {
         self.mgmt_writer.take();
         self.data_reader.take();
         self.data_writer.take();
+        // Drop the ACK sender so any awaiter on the rx side unblocks
+        // with RecvError (which wait_for_ack translates into a UI error).
+        self.pending_ack.take();
         self.state = SessionState::Disconnected;
     }
 }

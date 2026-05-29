@@ -18,6 +18,17 @@ const { events } = useEventLog();
 const { fps } = useFrameRate();
 const { push: pushToast } = useToast();
 
+// Debounce select changes so holding ↑/↓ doesn't fire one invoke per tick
+// (rateHz path issues two CFG-2 commands; back-to-back could land out of
+// order on the substation).
+function debounced<T>(ms: number, fn: (v: T) => void | Promise<void>) {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  return (v: T) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(v), ms);
+  };
+}
+
 // Connection form (single substation — reference UI is single-target).
 const connIp = ref("10.15.48.12");
 const connMgmtPort = ref("8000");
@@ -166,7 +177,7 @@ async function triggerCmd() {
 }
 
 // Heartbeat live update.
-watch(heartbeatSecs, async (v) => {
+watch(heartbeatSecs, debounced<string>(250, async (v) => {
   if (!running.value) return;
   const hb = parseFloat(v);
   if (Number.isFinite(hb) && hb > 0) {
@@ -176,12 +187,12 @@ watch(heartbeatSecs, async (v) => {
       pushToast(`心跳间隔修改失败: ${toastError(e)}`, "error");
     }
   }
-});
+}));
 
 // Rate live update — push fresh CFG-2 to substation. Only valid once
 // CFG-1 has been received (cfg2_sent / streaming); before then the
 // initial auto_handshake will carry the chosen rate.
-watch(rateHz, async (v) => {
+watch(rateHz, debounced<string>(250, async (v) => {
   const s = session.value;
   if (!s) return;
   if (s.state !== "streaming" && s.state !== "cfg2_sent") return;
@@ -195,7 +206,7 @@ watch(rateHz, async (v) => {
   } catch (e) {
     pushToast(`修改速率失败: ${toastError(e)}`, "error");
   }
-});
+}));
 </script>
 
 <template>

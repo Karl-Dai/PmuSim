@@ -5,74 +5,89 @@ import { useCommLog } from "../composables/useCommLog";
 
 const { selectedIdcode, configs } = useSessions();
 const { latestData } = useCommLog();
-const selectedRow = ref(-1);
+// Stable key (e.g. "stat-0" / "an-3" / "dg-7") so reselection survives
+// CFG-2 reload or analog/digital count changes.
+const selectedKey = ref<string | null>(null);
 
 const cfg = computed(() => configs.get(selectedIdcode.value));
 
-// STAT bit decoding per V3 §8.11 表 12. Returned as fixed 4 rows so the table
-// row count is stable (and so the user sees row 01-04 even before any data
-// arrives).
-const statRows = computed(() => {
-  const stat = latestData.value?.data.stat;
+const TRIGGER_REASONS: Record<number, string> = {
+  0: "手动",
+  1: "幅值越下限",
+  2: "幅值越上限",
+  3: "相角差",
+  4: "频率越限",
+  5: "频率变化率越限",
+  6: "线性组合",
+  7: "开关量",
+  8: "低频振荡",
+};
+
+interface DisplayRow {
+  key: string;
+  num: string;
+  name: string;
+  value: string;
+  extra: string;
+}
+
+// Single computed flattening STAT + analogs + digitals into ready-to-render
+// strings. With 100 Hz data, function-style cells like analogValue(i) re-run
+// per cell per frame; one computed lets Vue diff only the changed text nodes.
+// STAT bit decoding per V3 §8.11 表 12; analog scale per §8.5 表 8 row 16
+// (raw × ANUNIT × 1e-5); digital bits per §8.6.
+const displayRows = computed<DisplayRow[]>(() => {
+  const data = latestData.value?.data;
+  const c = cfg.value;
+  const rows: DisplayRow[] = [];
+
+  const stat = data?.stat;
   const has = stat !== undefined;
-  const triggerReasons: Record<number, string> = {
-    0: "手动",
-    1: "幅值越下限",
-    2: "幅值越上限",
-    3: "相角差",
-    4: "频率越限",
-    5: "频率变化率越限",
-    6: "线性组合",
-    7: "开关量",
-    8: "低频振荡",
-  };
-  return [
-    { name: "数据可用", value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常" },
-    { name: "装置状态", value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常" },
-    { name: "同步状态", value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步" },
-    { name: "触发原因", value: !has ? "-" : (stat! & 0x0800) === 0 ? "无" : (triggerReasons[stat! & 0xF] ?? "未知") },
-  ];
+  rows.push({ key: "stat-0", num: "01", name: "数据可用",
+    value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常", extra: "" });
+  rows.push({ key: "stat-1", num: "02", name: "装置状态",
+    value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常", extra: "" });
+  rows.push({ key: "stat-2", num: "03", name: "同步状态",
+    value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步", extra: "" });
+  rows.push({ key: "stat-3", num: "04", name: "触发原因",
+    value: !has ? "-" : (stat & 0x0800) === 0 ? "无" : (TRIGGER_REASONS[stat & 0xF] ?? "未知"),
+    extra: "" });
+
+  if (!c) return rows;
+
+  const analogStart = c.phnmr;
+  for (let i = 0; i < c.annmr; i++) {
+    const v = data?.analog[i];
+    const factor = c.anunit?.[i];
+    const value =
+      v === undefined ? "-" :
+      !factor ? v.toString() :
+      (v * factor * 0.00001).toFixed(3);
+    rows.push({
+      key: `an-${i}`,
+      num: String(5 + i).padStart(2, "0"),
+      name: c.channelNames[analogStart + i] || `AN_${i + 1}`,
+      value,
+      extra: String(factor ?? 0),
+    });
+  }
+
+  const digitalStart = c.phnmr + c.annmr;
+  const digitalTotal = c.dgnmr * 16;
+  for (let i = 0; i < digitalTotal; i++) {
+    const word = data?.digital[Math.floor(i / 16)];
+    const value = word === undefined ? "-" : ((word >> (i % 16)) & 1 ? "合位" : "分位");
+    rows.push({
+      key: `dg-${i}`,
+      num: String(5 + c.annmr + i).padStart(2, "0"),
+      name: c.channelNames[digitalStart + i] || `DG_${i + 1}`,
+      value,
+      extra: "",
+    });
+  }
+
+  return rows;
 });
-
-// channel_names layout per spec §8.2/8.5: phasors..analogs..digitals,
-// each digital group has 16 entries. Slice accordingly.
-const analogNames = computed(() => {
-  if (!cfg.value) return [];
-  const start = cfg.value.phnmr;
-  return cfg.value.channelNames.slice(start, start + cfg.value.annmr);
-});
-
-const digitalNames = computed(() => {
-  if (!cfg.value) return [];
-  const start = cfg.value.phnmr + cfg.value.annmr;
-  return cfg.value.channelNames.slice(start, start + cfg.value.dgnmr * 16);
-});
-
-// Render the engineering value (raw_int × ANUNIT × 0.00001) per V3 §8.5
-// 表 8 row 16 — the reference UI shows e.g. "2.000" for "风速_1" with
-// ANUNIT=100000 (factor=1.0). Falling back to raw when factor=0 keeps
-// the cell informative even if a malformed CFG-2 left anunit empty.
-function analogValue(i: number): string {
-  const v = latestData.value?.data.analog[i];
-  if (v === undefined) return "-";
-  const rawFactor = cfg.value?.anunit?.[i];
-  if (!rawFactor) return v.toString();
-  return (v * rawFactor * 0.00001).toFixed(3);
-}
-
-function digitalBit(i: number): string {
-  const data = latestData.value?.data.digital;
-  if (!data) return "-";
-  const wordIdx = Math.floor(i / 16);
-  const bitIdx = i % 16;
-  const word = data[wordIdx];
-  if (word === undefined) return "-";
-  return (word >> bitIdx) & 1 ? "合位" : "分位";
-}
-
-function selectRow(idx: number) {
-  selectedRow.value = idx;
-}
 </script>
 
 <template>
@@ -87,32 +102,13 @@ function selectRow(idx: number) {
         </tr>
       </thead>
       <tbody>
-        <!-- STAT 4 rows -->
-        <tr v-for="(r, i) in statRows" :key="`stat-${i}`"
-            :class="{ selected: selectedRow === i }"
-            @click="selectRow(i)">
-          <td>{{ String(i + 1).padStart(2, '0') }}</td>
-          <td>{{ r.name }}</td>
-          <td>{{ r.value }}</td>
-          <td></td>
-        </tr>
-        <!-- Analog rows -->
-        <tr v-for="(name, i) in analogNames" :key="`an-${i}`"
-            :class="{ selected: selectedRow === 4 + i }"
-            @click="selectRow(4 + i)">
-          <td>{{ String(5 + i).padStart(2, '0') }}</td>
-          <td>{{ name || `AN_${i + 1}` }}</td>
-          <td>{{ analogValue(i) }}</td>
-          <td>{{ cfg?.anunit[i] ?? 0 }}</td>
-        </tr>
-        <!-- Digital rows -->
-        <tr v-for="(name, i) in digitalNames" :key="`dg-${i}`"
-            :class="{ selected: selectedRow === 4 + analogNames.length + i }"
-            @click="selectRow(4 + analogNames.length + i)">
-          <td>{{ String(5 + analogNames.length + i).padStart(2, '0') }}</td>
-          <td>{{ name || `DG_${i + 1}` }}</td>
-          <td>{{ digitalBit(i) }}</td>
-          <td></td>
+        <tr v-for="row in displayRows" :key="row.key"
+            :class="{ selected: selectedKey === row.key }"
+            @click="selectedKey = row.key">
+          <td>{{ row.num }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.value }}</td>
+          <td>{{ row.extra }}</td>
         </tr>
         <tr v-if="!cfg" class="empty-row">
           <td colspan="4">点击「连接」后,CFG-2 到达再显示通道列表</td>

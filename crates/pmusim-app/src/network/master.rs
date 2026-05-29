@@ -6,7 +6,7 @@ use log::{error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
 use pmusim_core::protocol::builder::{build_command, build_config};
@@ -1002,8 +1002,18 @@ impl MasterStation {
                         session.last_heartbeat = std::time::Instant::now();
                         session.missed_heartbeats = 0;
                     }
+                } else if cmd.cmd == Cmd::Ack as u16 || cmd.cmd == Cmd::Nack as u16 {
+                    // Deliver to whoever is awaiting (do_auto_handshake step).
+                    // Without this, NACK on CFG-2 download is silently ignored
+                    // and we proceed to OpenData on a half-broken handshake.
+                    let tx = {
+                        let mut sessions_w = sessions.write().await;
+                        sessions_w.get_mut(idcode).and_then(|s| s.pending_ack.take())
+                    };
+                    if let Some(tx) = tx {
+                        let _ = tx.send(cmd.cmd);
+                    }
                 }
-                // ACK / NACK are informational - no state change needed.
             }
             Frame::Config(cfg) => {
                 if cfg.cfg_type == FrameType::Cfg1 as u8 {
@@ -1214,6 +1224,82 @@ impl MasterStation {
         );
     }
 
+    /// Install a one-shot waiter into the session's `pending_ack` slot.
+    /// Returns the receiver; the next ACK/NACK CMD frame received on the
+    /// mgmt pipe will fill it (see `process_mgmt_frame`).
+    async fn install_ack_waiter(
+        sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        idcode: &str,
+    ) -> Option<oneshot::Receiver<u16>> {
+        let (tx, rx) = oneshot::channel();
+        let mut sessions_w = sessions.write().await;
+        let s = sessions_w.get_mut(idcode)?;
+        s.pending_ack = Some(tx);
+        Some(rx)
+    }
+
+    /// Await up to 2s for the substation's ACK/NACK reply. `true` on ACK
+    /// (0xE000); `false` on NACK (0x2000) or timeout — with a UI-visible
+    /// Error event so the user sees why the handshake stalled.
+    async fn wait_for_ack(
+        event_tx: &EventSender,
+        idcode: &str,
+        rx: oneshot::Receiver<u16>,
+        step: &str,
+    ) -> bool {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+            Ok(Ok(cmd)) if cmd == Cmd::Ack as u16 => true,
+            Ok(Ok(cmd)) if cmd == Cmd::Nack as u16 => {
+                emit_event(event_tx, PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: format!("{step}: 子站 NACK,握手中止"),
+                });
+                false
+            }
+            Ok(Ok(other)) => {
+                emit_event(event_tx, PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: format!("{step}: 子站回了非 ACK/NACK CMD={other:#06x}"),
+                });
+                false
+            }
+            Ok(Err(_)) => {
+                emit_event(event_tx, PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: format!("{step}: ACK 等待通道关闭"),
+                });
+                false
+            }
+            Err(_) => {
+                emit_event(event_tx, PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: format!("{step}: ACK 等待超时 (2s)"),
+                });
+                false
+            }
+        }
+    }
+
+    /// Install waiter → send command → wait for ACK. Combined helper for
+    /// steps that take a single CMD frame (e.g. SendCfg2Cmd).
+    async fn do_send_cmd_await_ack(
+        sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        event_tx: &EventSender,
+        idcode: &str,
+        cmd: u16,
+        step: &str,
+    ) -> bool {
+        let Some(rx) = Self::install_ack_waiter(sessions, idcode).await else {
+            emit_event(event_tx, PmuEvent::Error {
+                idcode: idcode.to_string(),
+                error: format!("{step}: session 已消失"),
+            });
+            return false;
+        };
+        Self::do_send_cmd(sessions, event_tx, idcode, cmd).await;
+        Self::wait_for_ack(event_tx, idcode, rx, step).await
+    }
+
     /// Automated handshake sequence. After SendCfg1 the substation's real
     /// IDCODE arrives and the session is re-keyed, so we resolve the current
     /// idcode via peer_host:peer_mgmt_port before each subsequent step.
@@ -1265,16 +1351,33 @@ impl MasterStation {
             }
         };
 
-        // Step 2: Send CFG-2 command.
-        Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2Cmd as u16).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        // Step 2: 下传 CFG-2 命令 → expect ACK (V3 §8.4).
+        if !Self::do_send_cmd_await_ack(
+            sessions, event_tx, &current, Cmd::SendCfg2Cmd as u16, "SendCfg2Cmd",
+        )
+        .await
+        {
+            return;
+        }
 
-        // Step 3: Send CFG-2 config.
+        // Step 3: 下传 CFG-2 配置帧 → expect ACK (V3 §8.6).
+        let Some(rx3) = Self::install_ack_waiter(sessions, &current).await else {
+            emit_event(event_tx, PmuEvent::Error {
+                idcode: current.clone(),
+                error: "CFG-2 帧: session 已消失".into(),
+            });
+            return;
+        };
         Self::do_send_cfg2(sessions, event_tx, &current, period).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if !Self::wait_for_ack(event_tx, &current, rx3, "CFG-2 帧").await {
+            return;
+        }
 
-        // Step 4: Request CFG-2 back.
+        // Step 4: 召唤 CFG-2 → substation re-uploads CFG-2 frame (not ACK).
+        // No ACK to wait on here; the Cfg2Received event signals completion.
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2 as u16).await;
+        // Brief settle — wait_for_cfg2 here would be cleaner but we don't
+        // currently track it; 500ms is enough for a healthy LAN substation.
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Step 5: Open the V3 data pipe (no-op for V2), then send OpenData.
