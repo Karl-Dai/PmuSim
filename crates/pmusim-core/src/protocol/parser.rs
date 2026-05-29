@@ -19,10 +19,17 @@ fn read_f32(data: &[u8], off: usize) -> f32 {
     f32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
 }
 
+/// Decode a fixed-width IDCODE field byte-preserving. Spec says IDCODE
+/// is 8 ASCII characters, but field-observed substations sometimes
+/// emit latin-1 / GBK bytes — `from_utf8_lossy` would replace those
+/// with U+FFFD, after which `encode_ascii_padded` (in the builder)
+/// would expand each replacement to 3 UTF-8 bytes and the resulting
+/// 8-byte slot would no longer match the substation's IDCODE. Latin-1
+/// codepoint-per-byte gives a perfect round-trip: byte N decodes to
+/// Unicode U+00N and re-encodes back to byte N.
 fn decode_ascii(data: &[u8]) -> String {
-    String::from_utf8_lossy(data)
-        .trim_end_matches('\0')
-        .to_string()
+    let end = data.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+    data[..end].iter().map(|&b| b as char).collect()
 }
 
 fn decode_gbk(data: &[u8]) -> String {
@@ -51,10 +58,23 @@ pub fn parse(
     let (frame_type, version) = parse_sync(sync).map_err(|e| PmuError::Parse(e))?;
 
     let size = read_u16(data, 2) as usize;
-    if data.len() < size {
+    // Smallest legal frame is V2 command (20 bytes); V3 command is 24.
+    // A SIZE of 0/1 would underflow `size - 2` below — release builds
+    // wrap to ~usize::MAX, then `data[off]` panics with an obscure
+    // out-of-bounds. Reject the frame cleanly here instead.
+    const MIN_FRAME_SIZE: usize = 8; // SYNC + SIZE + at least an IDCODE byte + CRC
+    if size < MIN_FRAME_SIZE {
         return Err(PmuError::Parse(format!(
-            "Frame truncated: expected {} bytes, got {}",
-            size,
+            "Frame SIZE field too small: {size} < {MIN_FRAME_SIZE}"
+        )));
+    }
+    // §8 every frame must be exactly SIZE bytes — extra bytes mean the
+    // caller fed us a glued buffer. Reject (was silently accepting before;
+    // a future UDP/replay path would have eaten the next frame as trailing
+    // garbage with no diagnostic).
+    if data.len() != size {
+        return Err(PmuError::Parse(format!(
+            "Frame length mismatch: SIZE={size} but data.len()={}",
             data.len()
         )));
     }
@@ -427,6 +447,64 @@ mod tests {
     fn frame_too_short() {
         let data = hex::decode("aa42").unwrap();
         assert!(parse(&data, 0, 0, 0, 0).is_err());
+    }
+
+    /// IDCODE byte preservation: a substation that emits non-ASCII bytes
+    /// in the IDCODE slot (e.g. GBK / latin-1 leakage) used to roundtrip
+    /// through from_utf8_lossy + as_bytes() to a completely different
+    /// 8-byte slot, and the substation would reject every subsequent
+    /// command. With latin-1 decode each byte 0xN maps to U+00N and
+    /// re-encodes back to byte 0xN.
+    #[test]
+    fn idcode_byte_roundtrip_non_ascii() {
+        use crate::protocol::builder::build_command;
+        use crate::protocol::frame::CommandFrame;
+        // Command frame with non-ASCII bytes in the IDCODE field.
+        let raw_idcode_bytes = [0xC4u8, 0xE3, 0xC1, 0xB9, 0x30, 0x30, 0x30, 0x30];
+        let frame = CommandFrame {
+            version: ProtocolVersion::V3,
+            idcode: raw_idcode_bytes.iter().map(|&b| b as char).collect(),
+            soc: 0x67B2C719,
+            fracsec: 0,
+            cmd: 0x0004,
+        };
+        let bytes = build_command(&frame).unwrap();
+        // IDCODE lives at offset 4..12 in V3 cmd frames.
+        assert_eq!(&bytes[4..12], &raw_idcode_bytes, "IDCODE bytes must round-trip");
+        // And parse round-trip should preserve the string back.
+        let parsed = parse(&bytes, 0, 0, 0, 0).unwrap();
+        if let Frame::Command(cmd) = parsed {
+            // String::len() counts UTF-8 bytes (latin-1 high-byte chars
+            // encode to 2 UTF-8 bytes each), but the logical idcode has
+            // 8 chars — one per original byte.
+            assert_eq!(cmd.idcode.chars().count(), 8);
+            let reencoded: Vec<u8> = cmd.idcode.chars()
+                .map(|c| c as u8)
+                .collect();
+            assert_eq!(reencoded, raw_idcode_bytes);
+        } else {
+            panic!("expected Command frame");
+        }
+    }
+
+    /// Frame SIZE < min must be rejected cleanly instead of underflowing
+    /// the subsequent `size - 2` index used for CRC.
+    #[test]
+    fn frame_too_small_size_rejected() {
+        // SIZE=0 in a V3 command frame.
+        let mut data = hex::decode("aa430018304758303047503167b2c719000000000004ac08").unwrap();
+        data[2] = 0; data[3] = 0;
+        let err = parse(&data, 0, 0, 0, 0);
+        assert!(err.is_err(), "size=0 must error, not panic");
+    }
+
+    /// Frame longer than declared SIZE must also be rejected (spec §8:
+    /// every frame is exactly SIZE bytes).
+    #[test]
+    fn frame_extra_trailing_bytes_rejected() {
+        let mut data = hex::decode("aa430018304758303047503167b2c719000000000004ac08").unwrap();
+        data.push(0xFF);
+        assert!(parse(&data, 0, 0, 0, 0).is_err(), "trailing bytes must error");
     }
 
     #[test]

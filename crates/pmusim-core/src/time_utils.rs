@@ -36,6 +36,33 @@ pub fn fracsec_to_ms(fracsec: u32, meas_rate: u32, version: u8) -> f64 {
     count as f64 / (meas_rate as f64 / 1000.0)
 }
 
+/// V3 §8.11 表 4 time-quality bits (bit27-24 of FRACSEC). Returns a
+/// short Chinese label so the UI can surface GPS lock status alongside
+/// the data frame.
+pub fn fracsec_time_quality(fracsec: u32) -> (u8, &'static str) {
+    let bits = ((fracsec >> 24) & 0x0F) as u8;
+    let label = match bits {
+        0b0000 => "时钟锁定",
+        0b0001 => "失锁 <s",
+        0b0010 => "失锁 <s",
+        0b0011 => "失锁 <s",
+        0b0100 => "失锁 <s",
+        0b0101 => "失锁 <s",
+        0b0110 => "失锁 <s",
+        0b0111 => "失锁 <s",
+        0b1000 => "失锁 <1s",
+        0b1001 => "失锁 <0.1s",
+        0b1010 => "失锁 <1s",
+        0b1011 => "失锁 <10s",
+        0b1100 => "保留",
+        0b1101 => "保留",
+        0b1110 => "保留",
+        0b1111 => "时钟失效",
+        _ => "未知",
+    };
+    (bits, label)
+}
+
 pub fn current_soc() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

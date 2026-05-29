@@ -1,9 +1,10 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use pmusim_core::protocol::constants::ProtocolVersion;
 use pmusim_core::protocol::frame::ConfigFrame;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex as TokioMutex};
 
 /// Process-wide monotonic counter for session UIDs. Never reused, so a
 /// background task spawned for session N can detect that the slot at its
@@ -32,7 +33,12 @@ pub struct SubStationSession {
     pub state: SessionState,
 
     pub mgmt_reader: Option<OwnedReadHalf>,
-    pub mgmt_writer: Option<OwnedWriteHalf>,
+    /// Held in `Arc<Mutex<>>` so do_send_cmd can clone the handle out
+    /// of the sessions map, drop the sessions write lock, and await the
+    /// tcp write_all on the per-writer mutex — instead of blocking
+    /// every other session's operations on the sessions RwLock for the
+    /// duration of one slow peer's TCP buffer drain.
+    pub mgmt_writer: Option<Arc<TokioMutex<OwnedWriteHalf>>>,
     pub data_reader: Option<OwnedReadHalf>,
     pub data_writer: Option<OwnedWriteHalf>,
 
@@ -55,6 +61,12 @@ pub struct SubStationSession {
     /// gate every DataFrame with bit10 set would kick a new handshake
     /// (the bit is sticky for up to 1 min per spec §8.11 表 12).
     pub cfg_change_seen: bool,
+
+    /// SOC of the most recent outbound heartbeat. The substation echoes
+    /// the same SOC per §8.13; mismatched values either mean a replay
+    /// or a desync we can't trust the liveness signal from. None when
+    /// no heartbeat is outstanding.
+    pub pending_heartbeat_soc: Option<u32>,
 }
 
 impl SubStationSession {
@@ -78,6 +90,7 @@ impl SubStationSession {
             missed_heartbeats: 0,
             pending_ack: None,
             cfg_change_seen: false,
+            pending_heartbeat_soc: None,
         }
     }
 

@@ -72,6 +72,13 @@ const stateLabel = computed(() => {
     disconnected: "已断开",
   }[s ?? "disconnected"] ?? "";
 });
+// 状态语义色：在线类绿、断开红、无会话不着色
+const stateClass = computed(() => {
+  const s = session.value?.state;
+  if (!s) return "";
+  if (s === "disconnected") return "st-err";
+  return "st-ok";
+});
 
 // Latest data SOC → wall time string. Per V3 §8.11:
 //   ms = FRACSEC_count / (MEAS_RATE / 1000)
@@ -253,7 +260,7 @@ watch(rateHz, debounced<string>(250, async (v) => {
       </div>
 
       <div class="readout">
-        <div class="rd-row"><label>状态</label><span class="rd-val">{{ stateLabel || "—" }}</span></div>
+        <div class="rd-row"><label>状态</label><span class="rd-val" :class="stateClass">{{ stateLabel || "—" }}</span></div>
         <div class="rd-row"><label>最新时间</label><span class="rd-val mono">{{ latestTime }}</span></div>
         <div class="rd-row"><label>上传速率</label><span class="rd-val mono">{{ fps }} <span class="unit">帧/秒</span></span></div>
       </div>
@@ -284,16 +291,16 @@ watch(rateHz, debounced<string>(250, async (v) => {
   overflow: hidden;
 }
 fieldset {
-  border: 1px solid #8a8a82;
+  border: 1px solid var(--border);
   border-radius: 0;
   padding: 10px 12px 12px;
-  background: #f2f1ea;
+  background: var(--bg-panel);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
 }
 fieldset legend {
   padding: 0 6px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-dim);
   letter-spacing: 0.5px;
 }
 
@@ -319,7 +326,7 @@ fieldset legend {
 .ctl-with-suffix > input { flex: 1; min-width: 0; }
 .row > label {
   text-align: right;
-  color: #444;
+  color: var(--text-dim);
   font-size: 13px;
   line-height: 22px;
   user-select: none;
@@ -329,7 +336,7 @@ fieldset legend {
 .row > label::after {
   content: ":";
   margin-left: 2px;
-  color: #777;
+  color: var(--text-faint);
 }
 
 /* Inputs & selects share identical box metrics so vertical edges line
@@ -341,20 +348,20 @@ fieldset legend {
   width: 100%;
   height: 22px;
   padding: 0 6px;
-  border: 1px solid #8a8a82;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
   font-size: 13px;
   line-height: 20px;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  color: #1a1a1a;
+  color: var(--text);
   border-radius: 0;
   box-shadow: inset 1px 1px 0 rgba(0,0,0,0.04);
   outline: none;
 }
 .row input:focus,
 .row select:focus {
-  border-color: #4178c7;
-  box-shadow: inset 0 0 0 1px rgba(65,120,199,0.35);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(37,99,168,0.35);
 }
 .row input::placeholder { color: #aaa; font-style: italic; }
 
@@ -374,8 +381,8 @@ fieldset legend {
 .row input[readonly],
 .row input:disabled,
 .row select:disabled {
-  background-color: #e6e5dd;
-  color: #666;
+  background-color: var(--bg-disabled);
+  color: var(--text-dim);
   cursor: not-allowed;
 }
 .row select:disabled {
@@ -423,7 +430,7 @@ fieldset legend {
 }
 .btn:hover:not(:disabled) {
   background: linear-gradient(#fffefb, #dedccd);
-  border-color: #4178c7;
+  border-color: var(--accent);
 }
 .btn:active:not(:disabled) {
   background: linear-gradient(#c4c2b3, #aaa89a);
@@ -439,7 +446,7 @@ fieldset legend {
 .readout {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px dashed #b5b5ad;
+  border-top: 1px dashed var(--border-dash);
 }
 .rd-row {
   display: grid;
@@ -450,21 +457,24 @@ fieldset legend {
 }
 .rd-row > label {
   text-align: right;
-  color: #555;
+  color: var(--text-dim);
   font-size: 13px;
 }
 .rd-row > label::after {
   content: ":";
   margin-left: 2px;
-  color: #888;
+  color: var(--text-faint);
 }
 .rd-val {
   font-size: 13px;
-  color: #1a1a1a;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+/* 状态读数语义色：在线绿 / 断开红 */
+.rd-val.st-ok { color: var(--ok); font-weight: 600; }
+.rd-val.st-err { color: var(--err); font-weight: 600; }
 .rd-val .unit {
-  color: #777;
+  color: var(--text-faint);
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   margin-left: 2px;
   font-size: 12px;
@@ -482,8 +492,8 @@ fieldset legend {
 .log-list {
   flex: 1;
   overflow: auto;
-  background: #fffef8;
-  border: 1px solid #b5b5ad;
+  background: var(--bg-content);
+  border: 1px solid var(--border-dash);
   box-shadow: inset 1px 1px 0 rgba(0,0,0,0.04);
   padding: 4px 6px;
   font-size: 12px;
@@ -497,8 +507,8 @@ fieldset legend {
   text-overflow: ellipsis;
   color: #333;
 }
-.log-line.error { color: #b91c1c; }
-.log-time { color: #888; margin-right: 8px; font-variant-numeric: tabular-nums; }
+.log-line.error { color: var(--err); }
+.log-time { color: var(--text-faint); margin-right: 8px; font-variant-numeric: tabular-nums; }
 .log-empty {
   color: #aaa;
   text-align: center;

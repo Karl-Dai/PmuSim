@@ -44,6 +44,8 @@ pub struct DataInfo {
     /// FORMAT bits 0-3 from the matching CFG-2 — frontend can use bit0
     /// to decide phasor display (rectangular vs polar).
     pub format_flags: u16,
+    /// FRACSEC bit27-24 = §8.11 表 4 GPS time-quality code. 0 = locked.
+    pub time_quality: u8,
     pub freq: f64,
     pub dfreq: f64,
     pub analog: Vec<f64>,

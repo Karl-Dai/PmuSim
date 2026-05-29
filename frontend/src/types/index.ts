@@ -25,6 +25,8 @@ export interface DataInfo {
   stat: number;
   /** FORMAT bits 0-3 from the matching CFG-2. Bit0=1 polar phasors, bit1-3 = float toggles. */
   format_flags: number;
+  /** FRACSEC bit27-24 = §8.11 表 4 GPS time-quality code. 0=lock, 0xF=invalid. */
+  time_quality: number;
   freq: number;
   dfreq: number;
   analog: number[];

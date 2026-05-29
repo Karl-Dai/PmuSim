@@ -76,11 +76,39 @@ onMounted(() => {
 </template>
 
 <style>
+/* ── 统一调色板 ──────────────────────────────────────────────────────
+   保留老式 SCADA 暖灰机箱气质，但：去掉内容区的黄味、把三种蓝收敛成
+   一个主蓝、拉开背景层级、并补上状态语义色（绿/红/琥珀）。 */
+:root {
+  /* 背景层级：机箱(暗) → 面板 → 内容(近白) */
+  --bg-chrome: #cdccc0;
+  --bg-panel: #f4f3ec;
+  --bg-content: #fcfcfa;
+  --bg-input: #ffffff;
+  --bg-disabled: #e7e6de;
+  /* 边框 */
+  --border: #8a8a82;
+  --border-soft: #d8d6cc;
+  --border-dash: #b5b5ad;
+  /* 统一主蓝 + 派生 */
+  --accent: #2563a8;
+  --accent-dark: #1d4f88;
+  --accent-tint: #eaf1fb;        /* hover / 浅高亮 */
+  --accent-on-sel: #cfe0f5;      /* 选中行内的次要文字 */
+  /* 文字 */
+  --text: #1a1a1a;
+  --text-dim: #555;
+  --text-faint: #888;
+  /* 状态语义色 */
+  --ok: #1d7a3e;
+  --warn: #b06a00;
+  --err: #c02626;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   font-size: 13px;
-  color: #1a1a1a;
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -88,17 +116,17 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #d4d2c5;
+  background: var(--bg-chrome);
 }
 .title-bar {
-  background: linear-gradient(#5a8ccc, #2c5a99);
+  background: linear-gradient(var(--accent), var(--accent-dark));
   color: #fff;
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.3px;
   text-shadow: 0 1px 0 rgba(0,0,0,0.25);
-  border-bottom: 1px solid #1a467a;
+  border-bottom: 1px solid var(--accent-dark);
   display: flex;
   align-items: center;
   justify-content: space-between;

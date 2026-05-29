@@ -72,42 +72,42 @@
 
 ## P2 — 健壮性 / 可观测性
 
-### [ ] 9. FRACSEC 时间质量位丢失
+### [x] 9. FRACSEC 时间质量位丢失
 - **位置:** `crates/pmusim-core/src/time_utils.rs:31` + `crates/pmusim-app/src/events.rs:36`
 - **现状:** `& 0x00FFFFFF` 砍掉高 8 位,DataInfo 没有 `time_quality: u8` 字段。
 - **规约:** §8.11 表 4 16 种时钟状态(锁定/失锁/偏差 10s..0.1s)
 - **触发:** 现场 GPS 失锁,运维从 UI 看不出原因。
 - **修复:** `time_quality: u8` 字段加到 `DataInfo`,前端按表 4 翻译。
 
-### [ ] 10. `mgmt_writer.write_all().await` 在 sessions WRITE 锁内
+### [x] 10. `mgmt_writer.write_all().await` 在 sessions WRITE 锁内
 - **位置:** `crates/pmusim-app/src/network/master.rs:1048-1056`
 - **现状:** TCP write 期间整张 session map 被锁,heartbeat / data loop / 新 connect 全排队。
 - **触发:** 单个 slow peer(buffer 满 / RTT 高)阻塞所有 session 操作。
 - **修复:** 在锁外 take 出 writer 的引用计数副本(或 channel),write 在锁外 await。
 
-### [ ] 11. IDCODE 用 `from_utf8_lossy` 损坏非 ASCII 字节
+### [x] 11. IDCODE 用 `from_utf8_lossy` 损坏非 ASCII 字节
 - **位置:** `crates/pmusim-core/src/protocol/parser.rs:18` (`decode_ascii`)
 - **触发:** 子站固件 bug 发出 GBK/latin-1 字节(0xC4 0xE3...),decode 得 U+FFFD,re-encode 时 UTF-8 多字节展开成 EF BF BD ... 与原 8 字节完全不同,后续命令子站全拒。
 - **修复:** 按字节保存 `Vec<u8>`,显示用 lossy,网络发送用原字节。
 
-### [ ] 12. OpenData 不校验 SessionState ≥ Cfg2Sent
+### [x] 12. OpenData 不校验 SessionState ≥ Cfg2Sent
 - **位置:** `crates/pmusim-app/src/network/master.rs:407`
 - **触发:** 用户在 cfg2=None 时点"开启数据",`data_read_loop_outbound` 没 dims,所有帧 parse 失败但 RawFrame 仍上抛,Streaming 状态假成立。
 - **修复:** OpenData 入口 guard `state == Cfg2Sent`,否则 emit Error。
 
-### [ ] 13. `parse()` 在 SIZE < 2 时下溢索引
+### [x] 13. `parse()` 在 SIZE < 2 时下溢索引
 - **位置:** `crates/pmusim-core/src/protocol/parser.rs:47`
 - **现状:** `read_u16(data, size - 2)`,size=0/1 时 `0usize - 2` release 回绕成 ~usize::MAX → panic。
 - **触发:** 网络层 `read_frame` 已 guard `frame_size < 4`,但 lib API 公开,headless / unit test 直接喂坏帧会 panic。
 - **修复:** `parse` 头部增 `if size < MIN_FRAME_SIZE_PER_VERSION` 校验。
 
-### [ ] 14. `data.len() == size` 不严格相等
+### [x] 14. `data.len() == size` 不严格相等
 - **位置:** `crates/pmusim-core/src/protocol/parser.rs:38`
 - **现状:** 只查 `data.len() < size`,尾随字节静默丢弃。
 - **触发:** 上层若把粘连帧投入 parse,后续帧丢失。当前网络路径 read_frame 精确切片所以安全,future UDP/file replay 会踩。
 - **修复:** 改为 `!=`,或返回消费字节数。
 
-### [ ] 15. 心跳响应不校验 SOC echo
+### [x] 15. 心跳响应不校验 SOC echo
 - **位置:** `crates/pmusim-app/src/network/master.rs:959`
 - **规约:** §8.13 "子站接收到心跳信号后立即将心跳信号返回,与主站下发报文时标相同"
 - **现状:** 只匹配 cmd == Heartbeat 字段就清零 missed。

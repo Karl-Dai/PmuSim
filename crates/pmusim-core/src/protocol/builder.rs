@@ -19,8 +19,19 @@ fn write_f32(buf: &mut Vec<u8>, val: f32) {
     buf.extend_from_slice(&val.to_be_bytes());
 }
 
+/// Byte-preserving inverse of `decode_ascii`: every char in `s` whose
+/// Unicode codepoint is <= 0xFF encodes back to its original byte;
+/// codepoints > 0xFF (e.g. a U+FFFD that snuck in from an external
+/// source) get replaced by `?` so the field still aligns. ASCII case
+/// is unaffected. Pair with parser::decode_ascii for round-trip
+/// fidelity on substations that emit non-ASCII IDCODEs.
 fn encode_ascii_padded(s: &str, len: usize) -> Vec<u8> {
-    let mut buf = s.as_bytes().to_vec();
+    let mut buf: Vec<u8> = s.chars()
+        .map(|c| {
+            let cp = c as u32;
+            if cp <= 0xFF { cp as u8 } else { b'?' }
+        })
+        .collect();
     buf.resize(len, 0);
     buf.truncate(len);
     buf

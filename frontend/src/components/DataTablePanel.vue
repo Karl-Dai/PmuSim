@@ -29,6 +29,7 @@ interface DisplayRow {
   name: string;
   value: string;
   extra: string;
+  tone?: "ok" | "err" | "warn"; // 状态值语义色，仅 STAT 行用
 }
 
 // Single computed flattening STAT + analogs + digitals into ready-to-render
@@ -43,15 +44,20 @@ const displayRows = computed<DisplayRow[]>(() => {
 
   const stat = data?.stat;
   const has = stat !== undefined;
+  const ok = (good: boolean): DisplayRow["tone"] => !has ? undefined : good ? "ok" : "err";
   rows.push({ key: "stat-0", num: "01", name: "数据可用",
-    value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常", extra: "" });
+    value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常", extra: "",
+    tone: ok((stat! & 0x8000) === 0) });
   rows.push({ key: "stat-1", num: "02", name: "装置状态",
-    value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常", extra: "" });
+    value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常", extra: "",
+    tone: ok((stat! & 0x4000) === 0) });
   rows.push({ key: "stat-2", num: "03", name: "同步状态",
-    value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步", extra: "" });
+    value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步", extra: "",
+    tone: ok((stat! & 0x2000) === 0) });
   rows.push({ key: "stat-3", num: "04", name: "触发原因",
     value: !has ? "-" : (stat & 0x0800) === 0 ? "无" : (TRIGGER_REASONS[stat & 0xF] ?? "未知"),
-    extra: "" });
+    extra: "",
+    tone: !has || (stat! & 0x0800) === 0 ? undefined : "warn" });
 
   if (!c) return rows;
 
@@ -117,7 +123,7 @@ const displayRows = computed<DisplayRow[]>(() => {
             @click="selectedKey = row.key">
           <td>{{ row.num }}</td>
           <td>{{ row.name }}</td>
-          <td>{{ row.value }}</td>
+          <td :class="row.tone ? `tone-${row.tone}` : ''">{{ row.value }}</td>
           <td>{{ row.extra }}</td>
         </tr>
         <tr v-if="!cfg" class="empty-row">
@@ -132,8 +138,8 @@ const displayRows = computed<DisplayRow[]>(() => {
 .data-table-wrap {
   flex: 1;
   overflow: auto;
-  background: #fefdf0;
-  border: 1px solid #8a8a82;
+  background: var(--bg-content);
+  border: 1px solid var(--border);
   box-shadow: inset 1px 1px 0 rgba(0,0,0,0.03);
 }
 .data-table {
@@ -144,13 +150,13 @@ const displayRows = computed<DisplayRow[]>(() => {
 .data-table thead th {
   position: sticky;
   top: 0;
-  background: linear-gradient(#dedccd, #cfcdbe);
+  background: linear-gradient(#eceadf, #dcdacc);
   font-weight: 600;
   color: #2a2a2a;
   padding: 7px 10px;
   text-align: left;
-  border-right: 1px solid #a8a89a;
-  border-bottom: 1px solid #8a8a82;
+  border-right: 1px solid #b6b5a8;
+  border-bottom: 1px solid var(--border);
   letter-spacing: 0.3px;
   white-space: nowrap;
 }
@@ -159,18 +165,22 @@ const displayRows = computed<DisplayRow[]>(() => {
 
 .data-table tbody td {
   padding: 5px 10px;
-  border-right: 1px solid #e6e2c5;
-  border-bottom: 1px solid #ece8cf;
+  border-right: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
-  color: #1a1a1a;
+  color: var(--text);
   height: 24px;
 }
 /* 序号列：等宽数字 + 居中 */
 .data-table tbody td:first-child {
   text-align: center;
-  color: #777;
+  color: var(--text-faint);
 }
+/* 状态值语义色 */
+.data-table tbody td.tone-ok { color: var(--ok); font-weight: 600; }
+.data-table tbody td.tone-err { color: var(--err); font-weight: 600; }
+.data-table tbody td.tone-warn { color: var(--warn); font-weight: 600; }
 /* 名称列：用中文 sans，避免 monospace 把中文撑很宽 */
 .data-table tbody td:nth-child(2) {
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -179,22 +189,26 @@ const displayRows = computed<DisplayRow[]>(() => {
 
 .data-table tbody tr { cursor: pointer; }
 .data-table tbody tr:nth-child(even) { background: rgba(0,0,0,0.015); }
-.data-table tbody tr:hover { background: #f5f3d8; }
+.data-table tbody tr:hover { background: var(--accent-tint); }
 .data-table tbody tr.selected,
 .data-table tbody tr.selected:hover {
-  background: #2a6fc7;
+  background: var(--accent);
   color: #fff;
 }
-.data-table tbody tr.selected td {
+/* 选中行：语义色让位于白字，保证蓝底可读 */
+.data-table tbody tr.selected td,
+.data-table tbody tr.selected td.tone-ok,
+.data-table tbody tr.selected td.tone-err,
+.data-table tbody tr.selected td.tone-warn {
   color: #fff;
-  border-right-color: #1c5aa8;
-  border-bottom-color: #1c5aa8;
+  border-right-color: var(--accent-dark);
+  border-bottom-color: var(--accent-dark);
 }
-.data-table tbody tr.selected td:first-child { color: #cfe0f5; }
+.data-table tbody tr.selected td:first-child { color: var(--accent-on-sel); }
 
 .empty-row td,
 .empty-row td:first-child {
-  color: #9a9a8a;
+  color: var(--text-faint);
   text-align: center;
   font-style: italic;
   padding: 24px;

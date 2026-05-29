@@ -437,6 +437,24 @@ impl MasterStation {
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::SendCfg2 as u16).await;
                 }
                 MasterCmd::OpenData { idcode } => {
+                    // Spec §6 requires CFG-1 → CFG-2 → OpenData. Without
+                    // a CFG, data_read_loop_outbound has no dims; every
+                    // frame parse fails silently yet the UI flips to
+                    // Streaming and the user thinks it's working. Gate
+                    // the command and emit a UI-visible error instead.
+                    let state_ok = {
+                        let r = sessions.read().await;
+                        r.get(&idcode)
+                            .map(|s| matches!(s.state, SessionState::Cfg2Sent | SessionState::Streaming))
+                            .unwrap_or(false)
+                    };
+                    if !state_ok {
+                        emit_event(&event_tx, PmuEvent::Error {
+                            idcode: idcode.clone(),
+                            error: "OpenData 拒绝: 必须先完成 CFG-1/CFG-2 握手".into(),
+                        });
+                        continue;
+                    }
                     // For V3 the data pipe runs from master → substation, and the
                     // substation may start streaming the moment it receives
                     // OpenData. Open the pipe FIRST so the first frames are not
@@ -505,6 +523,18 @@ impl MasterStation {
             // the actual disconnect threshold 2 missed beats, not 3.
             let timeout_ms = ms.saturating_mul(3);
             for idcode in idcodes {
+                // Stamp the outbound SOC into the session BEFORE send so
+                // process_mgmt_frame's echo check has a value to compare
+                // (do_send_cmd uses current_soc() too — both call it within
+                // the same second 99.99% of the time, but record what we
+                // *will* send to keep the contract explicit).
+                let outbound_soc = current_soc();
+                {
+                    let mut sessions_w = sessions.write().await;
+                    if let Some(session) = sessions_w.get_mut(&idcode) {
+                        session.pending_heartbeat_soc = Some(outbound_soc);
+                    }
+                }
                 Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::Heartbeat as u16).await;
 
                 let mut sessions_w = sessions.write().await;
@@ -644,7 +674,7 @@ impl MasterStation {
                 return;
             };
             session.mgmt_reader = Some(reader);
-            session.mgmt_writer = Some(writer);
+            session.mgmt_writer = Some(Arc::new(tokio::sync::Mutex::new(writer)));
             session.uid
         };
 
@@ -1053,10 +1083,28 @@ impl MasterStation {
         match frame {
             Frame::Command(cmd) => {
                 if cmd.cmd == Cmd::Heartbeat as u16 {
+                    // §8.13: substation echoes the same SOC. If the echo
+                    // doesn't match the last outbound heartbeat, do NOT
+                    // reset liveness — it's either a replay or a stale
+                    // beat from before the last clock change. Log it for
+                    // diagnosis but keep counters running.
                     let mut sessions_w = sessions.write().await;
                     if let Some(session) = sessions_w.get_mut(idcode) {
-                        session.last_heartbeat = std::time::Instant::now();
-                        session.missed_heartbeats = 0;
+                        let echo_ok = match session.pending_heartbeat_soc.take() {
+                            // ±1s tolerance: the loop stamps an outbound
+                            // SOC reference, then do_send_cmd later calls
+                            // current_soc() inside the actual frame
+                            // build. A one-second tick between those two
+                            // is normal and harmless.
+                            Some(expected) => cmd.soc.abs_diff(expected) <= 1,
+                            None => true, // no pending — accept (covers boot race)
+                        };
+                        if echo_ok {
+                            session.last_heartbeat = std::time::Instant::now();
+                            session.missed_heartbeats = 0;
+                        } else {
+                            warn!("{idcode}: heartbeat SOC echo mismatch (got {})", cmd.soc);
+                        }
                     }
                 } else if cmd.cmd == Cmd::Ack as u16 || cmd.cmd == Cmd::Nack as u16 {
                     // Deliver to whoever is awaiting (do_auto_handshake step).
@@ -1151,21 +1199,27 @@ impl MasterStation {
             }
         };
 
-        let write_err: Option<String> = {
-            let mut sessions_w = sessions.write().await;
-            match sessions_w.get_mut(idcode) {
-                Some(session) => match session.mgmt_writer.as_mut() {
-                    Some(writer) => match writer.write_all(&raw).await {
-                        Ok(()) => {
-                            let _ = writer.flush().await;
-                            None
-                        }
-                        Err(e) => Some(e.to_string()),
-                    },
-                    None => Some("Management pipe vanished mid-send".into()),
-                },
-                None => Some("Session removed during send".into()),
+        // Clone the writer Arc out of the sessions map under a brief
+        // read lock; do the actual TCP write_all+flush on the writer's
+        // own mutex, NOT under sessions.write(). That way one slow peer
+        // can't block heartbeat_loop / other do_send_cmd invocations
+        // for unrelated sessions.
+        let writer_arc = {
+            let r = sessions.read().await;
+            r.get(idcode).and_then(|s| s.mgmt_writer.clone())
+        };
+        let write_err: Option<String> = match writer_arc {
+            Some(arc) => {
+                let mut writer = arc.lock().await;
+                match writer.write_all(&raw).await {
+                    Ok(()) => {
+                        let _ = writer.flush().await;
+                        None
+                    }
+                    Err(e) => Some(e.to_string()),
+                }
             }
+            None => Some("Management pipe vanished mid-send".into()),
         };
 
         if let Some(err) = write_err {
@@ -1306,17 +1360,24 @@ impl MasterStation {
             }
         };
 
-        // Write and update session.
+        // Write outside the sessions lock — same rationale as do_send_cmd
+        // (don't block other sessions on this peer's TCP buffer drain).
+        let writer_arc = {
+            let r = sessions.read().await;
+            r.get(idcode).and_then(|s| s.mgmt_writer.clone())
+        };
+        if let Some(arc) = writer_arc {
+            let mut writer = arc.lock().await;
+            if let Err(e) = writer.write_all(&raw).await {
+                error!("Failed to send CFG-2 to {idcode}: {e}");
+                return;
+            }
+            let _ = writer.flush().await;
+        }
+        // State + cfg2 cache update under a brief write lock.
         {
             let mut sessions_w = sessions.write().await;
             if let Some(session) = sessions_w.get_mut(idcode) {
-                if let Some(writer) = session.mgmt_writer.as_mut() {
-                    if let Err(e) = writer.write_all(&raw).await {
-                        error!("Failed to send CFG-2 to {idcode}: {e}");
-                        return;
-                    }
-                    let _ = writer.flush().await;
-                }
                 session.cfg2 = Some(cfg2);
                 // Mid-stream rate change pushes a fresh CFG-2 without
                 // tearing down the data pipe — keep Streaming so the UI
@@ -1597,6 +1658,7 @@ fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo 
         fracsec: df.fracsec,
         stat: df.stat,
         format_flags: df.format_flags,
+        time_quality: ((df.fracsec >> 24) & 0x0F) as u8,
         freq: df.freq,
         dfreq: df.dfreq,
         analog: df.analog.clone(),
