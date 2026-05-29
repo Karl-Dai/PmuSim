@@ -9,7 +9,9 @@ import { useEventLog } from "../composables/useEventLog";
 import { useFrameRate } from "../composables/useFrameRate";
 import { useToast, toastError } from "../composables/useToast";
 import { listenerReady } from "../composables/usePmuEvents";
+import { useI18n } from "../i18n";
 
+const { t } = useI18n();
 const { protocol } = useProtocol();
 const { running } = useServerStatus();
 const { sessions, configs, selectedIdcode } = useSessions();
@@ -57,7 +59,7 @@ function onDataPortInput(e: Event) {
 // data-pipe server and binds it (mgmt+1 by default) for the substation to push
 // to. V3 (2011): it's the REMOTE substation data port the master dials out to.
 const dataPortLabel = computed(() =>
-  protocol.value === "V2" ? "本地侦听端口" : "数据端口"
+  protocol.value === "V2" ? t("config.localListenPort") : t("config.dataPort")
 );
 
 // Editable runtime params.
@@ -71,13 +73,8 @@ const cfg = computed(() => configs.get(selectedIdcode.value));
 const idcodeDisplay = computed(() => session.value?.idcode ?? "");
 const stateLabel = computed(() => {
   const s = session.value?.state;
-  return {
-    connected: "已连接",
-    cfg1_received: "已收 CFG-1",
-    cfg2_sent: "已下传 CFG-2",
-    streaming: "正在接收",
-    disconnected: "已断开",
-  }[s ?? "disconnected"] ?? "";
+  if (!s) return "";
+  return t(`state.${s}`);
 });
 // 状态语义色：在线类绿、断开红、无会话不着色
 const stateClass = computed(() => {
@@ -153,7 +150,7 @@ async function startEverything() {
     const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
     await invoke("auto_handshake", { idcode: target, period: periodVal });
   } catch (e) {
-    pushToast(`启动失败: ${toastError(e)}`, "error");
+    pushToast(t("config.startFailed", { error: toastError(e) }), "error");
   } finally {
     busy.value = false;
   }
@@ -166,7 +163,7 @@ async function stopEverything() {
     await invoke("stop_server");
     running.value = false;
   } catch (e) {
-    pushToast(`停止失败: ${toastError(e)}`, "error");
+    pushToast(t("config.stopFailed", { error: toastError(e) }), "error");
   } finally {
     busy.value = false;
   }
@@ -177,7 +174,7 @@ async function pauseData() {
   try {
     await invoke("send_command", { idcode: session.value.idcode, cmd: "close_data", period: null });
   } catch (e) {
-    pushToast(`暂停失败: ${toastError(e)}`, "error");
+    pushToast(t("config.pauseFailed", { error: toastError(e) }), "error");
   }
 }
 
@@ -194,7 +191,7 @@ watch(heartbeatSecs, debounced<string>(250, async (v) => {
     try {
       await invoke("set_heartbeat_interval", { seconds: hb });
     } catch (e) {
-      pushToast(`心跳间隔修改失败: ${toastError(e)}`, "error");
+      pushToast(t("config.heartbeatFailed", { error: toastError(e) }), "error");
     }
   }
 }));
@@ -212,9 +209,9 @@ watch(rateHz, debounced<string>(250, async (v) => {
   try {
     await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2_cmd", period: null });
     await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2", period: periodVal });
-    pushToast(`已下发新速率 ${hz}Hz`, "info");
+    pushToast(t("config.rateApplied", { hz: String(hz) }), "info");
   } catch (e) {
-    pushToast(`修改速率失败: ${toastError(e)}`, "error");
+    pushToast(t("config.rateFailed", { error: toastError(e) }), "error");
   }
 }));
 </script>
@@ -222,17 +219,17 @@ watch(rateHz, debounced<string>(250, async (v) => {
 <template>
   <div class="config-panel">
     <section class="panel">
-      <div class="panel-hd">配置及运行信息</div>
+      <div class="panel-hd">{{ t("config.title") }}</div>
       <div class="panel-bd">
 
-      <div class="row"><label>子站地址</label><input v-model="connIp" /></div>
-      <div class="row"><label>命令端口</label><input v-model="connMgmtPort" inputmode="numeric" /></div>
+      <div class="row"><label>{{ t("config.substationAddr") }}</label><input v-model="connIp" /></div>
+      <div class="row"><label>{{ t("config.cmdPort") }}</label><input v-model="connMgmtPort" inputmode="numeric" /></div>
       <div class="row">
         <label>{{ dataPortLabel }}</label><input :value="connDataPort" @input="onDataPortInput" inputmode="numeric" />
       </div>
-      <div class="row"><label>IDCODE</label><input :value="idcodeDisplay" readonly placeholder="待握手" /></div>
+      <div class="row"><label>{{ t("config.idcode") }}</label><input :value="idcodeDisplay" readonly :placeholder="t('config.idcodePlaceholder')" /></div>
       <div class="row">
-        <label>速率</label>
+        <label>{{ t("config.rate") }}</label>
         <div class="ctl-with-suffix">
           <select v-model="rateHz">
             <option value="25">25 Hz</option>
@@ -244,17 +241,17 @@ watch(rateHz, debounced<string>(250, async (v) => {
         </div>
       </div>
       <div class="row">
-        <label>心跳间隔</label>
+        <label>{{ t("config.heartbeat") }}</label>
         <select v-model="heartbeatSecs">
-          <option value="1">1 秒</option>
-          <option value="5">5 秒</option>
-          <option value="10">10 秒</option>
-          <option value="30">30 秒</option>
+          <option value="1">{{ t("config.seconds", { n: 1 }) }}</option>
+          <option value="5">{{ t("config.seconds", { n: 5 }) }}</option>
+          <option value="10">{{ t("config.seconds", { n: 10 }) }}</option>
+          <option value="30">{{ t("config.seconds", { n: 30 }) }}</option>
         </select>
       </div>
-      <div class="row"><label>通讯协议</label><input value="TCP" disabled /></div>
+      <div class="row"><label>{{ t("config.commProtocol") }}</label><input value="TCP" disabled /></div>
       <div class="row">
-        <label>规约协议</label>
+        <label>{{ t("config.protocol") }}</label>
         <select v-model="protocol" :disabled="running">
           <option value="V2">2006 (V2)</option>
           <option value="V3">2011 (V3)</option>
@@ -262,28 +259,28 @@ watch(rateHz, debounced<string>(250, async (v) => {
       </div>
 
       <div class="btn-grid">
-        <button class="btn" @click="startEverything" :disabled="busy || running"><span>开始</span></button>
-        <button class="btn" @click="stopEverything" :disabled="busy || !running"><span>停止</span></button>
-        <button class="btn btn-wide" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>暂停</span></button>
+        <button class="btn" @click="startEverything" :disabled="busy || running"><span>{{ t("config.start") }}</span></button>
+        <button class="btn" @click="stopEverything" :disabled="busy || !running"><span>{{ t("config.stop") }}</span></button>
+        <button class="btn btn-wide" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>{{ t("config.pause") }}</span></button>
       </div>
 
       <div class="readout">
-        <div class="rd-row"><label>状态</label><span class="rd-val" :class="stateClass">{{ stateLabel || "—" }}</span></div>
-        <div class="rd-row"><label>最新时间</label><span class="rd-val mono">{{ latestTime }}</span></div>
-        <div class="rd-row"><label>上传速率</label><span class="rd-val mono">{{ fps }} <span class="unit">帧/秒</span></span></div>
+        <div class="rd-row"><label>{{ t("config.status") }}</label><span class="rd-val" :class="stateClass">{{ stateLabel || "—" }}</span></div>
+        <div class="rd-row"><label>{{ t("config.latestTime") }}</label><span class="rd-val mono">{{ latestTime }}</span></div>
+        <div class="rd-row"><label>{{ t("config.uploadRate") }}</label><span class="rd-val mono">{{ fps }} <span class="unit">{{ t("config.fpsUnit") }}</span></span></div>
       </div>
       </div>
     </section>
 
     <section class="panel log-fs">
-      <div class="panel-hd">事件日志</div>
+      <div class="panel-hd">{{ t("config.eventLog") }}</div>
       <div class="panel-bd log-bd">
         <div class="log-list">
           <div v-for="(e, i) in events" :key="i" :class="['log-line', e.kind]">
             <span class="log-time">{{ e.time }}</span>
             <span class="log-msg">{{ e.message }}</span>
           </div>
-          <div v-if="events.length === 0" class="log-empty">无事件</div>
+          <div v-if="events.length === 0" class="log-empty">{{ t("config.noEvents") }}</div>
         </div>
       </div>
     </section>
