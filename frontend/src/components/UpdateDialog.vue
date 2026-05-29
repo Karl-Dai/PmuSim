@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { useI18n } from '../i18n'
 
 const props = defineProps<{
   visible: boolean
@@ -12,6 +13,8 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'snooze'): void
 }>()
+
+const { t } = useI18n()
 
 const downloading = ref(false)
 const progress = ref(0)
@@ -104,14 +107,14 @@ onBeforeUnmount(() => {
         <div class="upd-dialog" role="dialog" aria-modal="true" aria-labelledby="upd-title">
           <div class="upd-header">
             <div class="upd-titles">
-              <div id="upd-title" class="upd-title">发现新版本</div>
-              <div class="upd-subtitle">新版本 v{{ version }} 已发布</div>
+              <div id="upd-title" class="upd-title">{{ t("update.title") }}</div>
+              <div class="upd-subtitle">{{ t("update.subtitle", { version }) }}</div>
             </div>
             <span class="upd-badge">v{{ version }}</span>
           </div>
 
           <div class="upd-body">
-            <div class="upd-section-label">更新日志</div>
+            <div class="upd-section-label">{{ t("update.changelog") }}</div>
             <div class="upd-notes" tabindex="0">
               <template v-for="(blk, i) in noteBlocks" :key="i">
                 <hr v-if="blk.kind === 'hr'" class="upd-hr" />
@@ -151,7 +154,7 @@ onBeforeUnmount(() => {
 
             <div v-if="downloading" class="upd-progress" aria-live="polite">
               <div class="upd-progress-row">
-                <span>正在下载 {{ progress }}%</span>
+                <span>{{ t("update.downloading", { progress }) }}</span>
                 <span class="upd-progress-pct">{{ progress }}%</span>
               </div>
               <div class="upd-track">
@@ -160,21 +163,21 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="error" class="upd-error" role="alert">
-              <div class="upd-error-title">更新失败</div>
+              <div class="upd-error-title">{{ t("update.failedTitle") }}</div>
               <pre class="upd-error-msg">{{ error }}</pre>
             </div>
           </div>
 
           <div class="upd-footer">
             <template v-if="!downloading && !error">
-              <button class="btn btn-ghost" @click="later">稍后</button>
-              <button class="btn btn-primary" @click="install">立即更新</button>
+              <button class="btn btn-ghost" @click="later">{{ t("update.later") }}</button>
+              <button class="btn btn-primary" @click="install">{{ t("update.installNow") }}</button>
             </template>
             <template v-else-if="error">
-              <button class="btn btn-ghost" @click="$emit('close')">关闭</button>
-              <button class="btn btn-primary" @click="install">重试</button>
+              <button class="btn btn-ghost" @click="$emit('close')">{{ t("update.close") }}</button>
+              <button class="btn btn-primary" @click="install">{{ t("update.retry") }}</button>
             </template>
-            <span v-else class="upd-footer-hint">下载中 {{ progress }}%</span>
+            <span v-else class="upd-footer-hint">{{ t("update.downloadingHint", { progress }) }}</span>
           </div>
         </div>
       </div>
