@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added 新增
+
+- 中/英界面切换: 标题栏 `中 / EN` 开关, 首次按系统语言自动判断(`navigator.language`), 选择记忆在本地(`localStorage`, 同步读取无闪屏); 覆盖全部 UI 文案与前端语义标签(STAT 解码 / 触发原因 / 开关量 / 会话状态)。零新依赖, 自研 `useI18n` composable / Runtime 中/English UI toggle in the title bar; first run follows the OS locale (`navigator.language`), the choice is remembered in `localStorage` (synchronous read, no flash); covers all UI text and frontend semantic labels (STAT decode / trigger reason / digital state / session state). Dependency-free in-house `useI18n` composable.
+
 ### Changed 改进
 
 - `ConfigInfoPanel`: V2 (2006) 也显示数据端口字段并命名为「本地侦听端口」(默认 命令端口+1, 可编辑) —— V2 主站是数据通道的**服务端**, 在本地 `bind` 此端口等子站主动上送; V3 (2011) 仍显示「数据端口」(主站外连子站的远程数据口)。修正 0.3.x simpmufep UI 重做时把端口字段可见性反转、V2 本地侦听端口被一并隐藏的问题 / `ConfigInfoPanel`: V2 (2006) now also shows the data-port field, labeled "本地侦听端口" (defaults to command-port + 1, editable) — the V2 master is the data-pipe **server** and binds this local port for the substation to push to; V3 (2011) keeps "数据端口" (the remote substation port the master dials out to). Fixes the 0.3.x simpmufep redesign hiding the V2 local-listen port.
