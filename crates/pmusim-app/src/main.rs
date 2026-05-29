@@ -19,6 +19,7 @@ fn main() {
             commands::auto_handshake,
             commands::set_heartbeat_interval,
             commands::poll_events,
+            commands::open_url,
             update::check_for_update,
             update::install_update,
             update::snooze_update,

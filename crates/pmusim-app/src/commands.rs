@@ -117,3 +117,25 @@ pub async fn set_heartbeat_interval(
     master.set_heartbeat_interval(seconds);
     Ok(())
 }
+
+/// Open an external URL in the user's default browser via the OS opener.
+/// Done without tauri-plugin-opener/shell so the title-bar GitHub link
+/// escapes the webview instead of navigating it away from the app.
+/// Restricted to http(s) so the frontend can't launch arbitrary programs.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) urls allowed".into());
+    }
+    #[cfg(target_os = "macos")]
+    let (cmd, args): (&str, Vec<&str>) = ("open", vec![url.as_str()]);
+    #[cfg(target_os = "windows")]
+    let (cmd, args): (&str, Vec<&str>) = ("cmd", vec!["/C", "start", "", url.as_str()]);
+    #[cfg(target_os = "linux")]
+    let (cmd, args): (&str, Vec<&str>) = ("xdg-open", vec![url.as_str()]);
+    std::process::Command::new(cmd)
+        .args(&args)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
