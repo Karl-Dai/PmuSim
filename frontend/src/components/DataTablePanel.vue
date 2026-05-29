@@ -58,17 +58,27 @@ const displayRows = computed<DisplayRow[]>(() => {
   const analogStart = c.phnmr;
   for (let i = 0; i < c.annmr; i++) {
     const v = data?.analog[i];
-    const factor = c.anunit?.[i];
+    const raw = c.anunit?.[i];
+    // ANUNIT high byte = IEEE C37.118 analog-type tag (0=single, 1=rms,
+    // 2=peak); low 24 bits = signed multiplier × 0.00001. Without masking
+    // the tag, a substation that reports ANUNIT=0x01000064 (rms, factor
+    // 100) shows up as 16_777_316 × 0.00001 ≈ 167.77 and blows up the
+    // displayed value ~1.6e4×.
+    const factor = raw === undefined ? 0 : (() => {
+      const low24 = raw & 0xFFFFFF;
+      const signed = low24 & 0x800000 ? low24 - 0x1000000 : low24;
+      return signed * 0.00001;
+    })();
     const value =
       v === undefined ? "-" :
-      !factor ? v.toString() :
-      (v * factor * 0.00001).toFixed(3);
+      factor === 0 ? v.toString() :
+      (v * factor).toFixed(3);
     rows.push({
       key: `an-${i}`,
       num: String(5 + i).padStart(2, "0"),
       name: c.channelNames[analogStart + i] || `AN_${i + 1}`,
       value,
-      extra: String(factor ?? 0),
+      extra: String(raw ?? 0),
     });
   }
 

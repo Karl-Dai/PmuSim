@@ -49,6 +49,12 @@ pub struct SubStationSession {
     /// §8.6 — without this we used fixed `sleep(500ms)` and silently
     /// proceeded even when the substation NACK'd the CFG-2.
     pub pending_ack: Option<oneshot::Sender<u16>>,
+
+    /// Latched once the data-pipe loop sees STAT bit10 = "子站配置已变
+    /// 更"; cleared when the refresh handshake completes. Without this
+    /// gate every DataFrame with bit10 set would kick a new handshake
+    /// (the bit is sticky for up to 1 min per spec §8.11 表 12).
+    pub cfg_change_seen: bool,
 }
 
 impl SubStationSession {
@@ -71,6 +77,7 @@ impl SubStationSession {
             last_heartbeat: std::time::Instant::now(),
             missed_heartbeats: 0,
             pending_ack: None,
+            cfg_change_seen: false,
         }
     }
 

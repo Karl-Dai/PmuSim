@@ -60,14 +60,57 @@ pub struct ConfigFrame {
     pub pmu_blocks: Vec<PmuBlock>,
 }
 
+/// IEEE C37.118 / V3 §8.5 ANUNIT high-byte interpretation. The low 24
+/// bits are the user-scaling multiplier; the high byte tags the
+/// physical interpretation. Treating the whole u32 as a factor (which
+/// we did before) produces a ~16-million-fold blowup for any RMS- or
+/// peak-tagged channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalogType {
+    SinglePoint = 0,
+    Rms = 1,
+    Peak = 2,
+    Unknown = 0xFF,
+}
+
+impl AnalogType {
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            0 => Self::SinglePoint,
+            1 => Self::Rms,
+            2 => Self::Peak,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 impl ConfigFrame {
     pub fn period_ms(&self) -> f64 {
         let base_freq: f64 = if self.fnom & 1 != 0 { 50.0 } else { 60.0 };
         (self.period as f64 / 100.0) * (1000.0 / base_freq)
     }
 
+    /// Scaling factor for analog channel `index`. Reads the low 24 bits
+    /// of ANUNIT as a signed integer and applies the spec multiplier
+    /// 0.00001. The high byte (analog type code) is masked off so an
+    /// RMS-tagged (0x01...) or peak-tagged channel does not get
+    /// interpreted as a factor of ~16.7M.
     pub fn analog_factor(&self, index: usize) -> f64 {
-        self.anunit[index] as f64 * 0.00001
+        let raw = self.anunit[index];
+        // Sign-extend the 24-bit signed integer in the low 3 bytes.
+        let low24 = raw & 0x00FFFFFF;
+        let signed: i32 = if low24 & 0x800000 != 0 {
+            (low24 | 0xFF000000) as i32
+        } else {
+            low24 as i32
+        };
+        (signed as f64) * 0.00001
+    }
+
+    /// Analog-type tag (ANUNIT high byte) for channel `index`. Useful
+    /// for UI display (e.g. "rms" vs "peak").
+    pub fn analog_type(&self, index: usize) -> AnalogType {
+        AnalogType::from_byte((self.anunit[index] >> 24) as u8)
     }
 }
 

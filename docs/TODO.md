@@ -38,31 +38,31 @@
 
 ## P1 — 链路抖动 / 现场异常时翻车
 
-### [ ] 4. 心跳计数器 off-by-one — 实际 2 次未响应就断
+### [x] 4. 心跳计数器 off-by-one — 实际 2 次未响应就断
 - **位置:** `crates/pmusim-app/src/network/master.rs:460`
 - **现状:** `session.missed_heartbeats += 1` 在 send 后无条件递增,与 `mgmt_read_loop` 收到回包置零发生竞态。稳态下 `missed_heartbeats=1`(因为 ++ 总是发生在收到响应之后),所以阈值 `>= 3` 实际只需 2 次连续未响应。
 - **触发:** 链路 flap 一两次就断开。
 - **修复:** 把"已发未确认"改成基于 `last_heartbeat` 时间差判断,或在 send 时记录 `pending_heartbeat_soc`,收到 echo 匹配后才清零。
 
-### [ ] 5. STAT bit10 (子站配置改变) 不触发重新召唤 CFG
+### [x] 5. STAT bit10 (子站配置改变) 不触发重新召唤 CFG
 - **位置:** `crates/pmusim-app/src/network/master.rs:1000`
 - **规约:** §8.11 表 12 — bit10=1 表示子站配置在 1 min 内变更
 - **触发:** 子站重新加载 CFG-2(通道数变化),master 用旧 dims 继续解,后续帧 size 对不上 → CRC fail → 静默丢帧,UI 还显示 Streaming。
 - **修复:** `data_read_loop_outbound` 检测 STAT bit10,emit `ConfigChanged` 事件并自动 `auto_handshake`。
 
-### [ ] 6. `do_send_cmd` IO 错误吞了不切状态
+### [x] 6. `do_send_cmd` IO 错误吞了不切状态
 - **位置:** `crates/pmusim-app/src/network/master.rs:1051-1053`
 - **现状:** `write_all` 失败只 log + return,session.state 不变,也不 emit Error。
 - **触发:** 子站 RST 之后,heartbeat_loop 每 30s 重试一次失败,UI 维持"在线"假象直到 `mgmt_read_loop` 因 EOF 才真清理(可能延迟数秒)。
 - **修复:** write 失败立刻 `state = Disconnected` + `emit Error` + 关 writer。
 
-### [ ] 7. CFG-2 channel_names 长度不校验
+### [x] 7. CFG-2 channel_names 长度不校验
 - **位置:** `crates/pmusim-app/src/network/master.rs:1108` (`do_send_cfg2` 从 cfg1 复制 channel_names)
 - **规约:** §6 "主站宜具有 CFG1/CFG2 配置帧的校验机制"
 - **触发:** cfg1.channel_names.len() ≠ phnmr + annmr + 16 × dgnmr,builder 仍序列化 → CFG-2 字节布局错位 → 子站 CRC fail 丢弃 → 死锁。
 - **修复:** `do_send_cfg2` 校验 + 不通过则 emit Error。
 
-### [ ] 8. ANUNIT 高字节 (类型码) 当数值用
+### [x] 8. ANUNIT 高字节 (类型码) 当数值用
 - **位置:** `crates/pmusim-core/src/protocol/frame.rs:43` (`analog_factor`)
 - **规约:** 规约 §8.2 表 5 字面写"原码 × 0.00001",未拆字节。但 V3 继承自 IEEE C37.118,高字节是模拟量类型(0=单点波形 / 1=RMS / 2=峰值)。
 - **触发:** 子站 ANUNIT=0x01000064(类型=1, 因子=100)时,当前算成 16777316 × 0.00001 ≈ 167.77 倍率,数据被放大 1.6e4 倍。Lab 子站全 0x00xxxxxx 所以暴露不出来。

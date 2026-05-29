@@ -142,11 +142,12 @@ impl MasterStation {
             .cmd_rx
             .take()
             .ok_or_else(|| "start() called twice".to_string())?;
+        let cmd_tx_loopback = self.cmd_tx.clone();
         let sessions = self.sessions.clone();
         let handle = self.event_tx.clone();
         let hb_interval = self.heartbeat_interval_ms.clone();
         self.tasks.push(tokio::spawn(async move {
-            Self::command_loop(cmd_rx, sessions.clone(), handle.clone()).await;
+            Self::command_loop(cmd_rx, cmd_tx_loopback, sessions.clone(), handle.clone()).await;
         }));
 
         // Spawn heartbeat loop.
@@ -408,9 +409,13 @@ impl MasterStation {
         }
     }
 
-    /// Process commands from the UI thread.
+    /// Process commands from the UI thread. Holds a self-loopback
+    /// `cmd_tx` clone so spawn-only paths (e.g. data_read_loop_outbound
+    /// reacting to STAT bit10) can re-enqueue AutoHandshake without
+    /// having to `tokio::spawn` a non-Send future of their own.
     async fn command_loop(
         mut cmd_rx: mpsc::Receiver<MasterCmd>,
+        cmd_tx: mpsc::Sender<MasterCmd>,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
         event_tx: EventSender,
     ) {
@@ -439,7 +444,7 @@ impl MasterStation {
                     // If the V3 data pipe fails to open (timeout / refused),
                     // skip OpenData entirely — otherwise the UI flips to
                     // Streaming on a pipe that will never deliver frames.
-                    if !Self::do_open_data_v3(&sessions, &event_tx, &idcode).await {
+                    if !Self::do_open_data_v3(&sessions, &cmd_tx, &event_tx, &idcode).await {
                         continue;
                     }
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::OpenData as u16).await;
@@ -462,7 +467,7 @@ impl MasterStation {
                     Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::Trigger as u16).await;
                 }
                 MasterCmd::AutoHandshake { idcode, period } => {
-                    Self::do_auto_handshake(&sessions, &event_tx, &idcode, period).await;
+                    Self::do_auto_handshake(&sessions, &cmd_tx, &event_tx, &idcode, period).await;
                 }
                 MasterCmd::Disconnect { idcode } => {
                     Self::do_disconnect(&sessions, &event_tx, &idcode).await;
@@ -492,13 +497,22 @@ impl MasterStation {
                     .collect()
             };
 
+            // Three-interval grace before declaring timeout. Using elapsed
+            // since last echo (instead of incrementing missed_heartbeats
+            // unconditionally after send) closes the off-by-one race
+            // where a prompt echo+counter-reset between send and the
+            // post-send `++` left the steady-state counter at 1 — making
+            // the actual disconnect threshold 2 missed beats, not 3.
+            let timeout_ms = ms.saturating_mul(3);
             for idcode in idcodes {
                 Self::do_send_cmd(&sessions, &event_tx, &idcode, Cmd::Heartbeat as u16).await;
 
                 let mut sessions_w = sessions.write().await;
                 if let Some(session) = sessions_w.get_mut(&idcode) {
-                    session.missed_heartbeats += 1;
-                    if session.missed_heartbeats >= 3 {
+                    let elapsed_ms = session.last_heartbeat.elapsed().as_millis() as u64;
+                    // Mirror the counter for any consumer that still reads it.
+                    session.missed_heartbeats = (elapsed_ms / ms.max(1)) as u32;
+                    if elapsed_ms > timeout_ms {
                         session.state = SessionState::Disconnected;
                         emit_event(
                             &event_tx,
@@ -683,6 +697,7 @@ impl MasterStation {
     /// that never opened.
     async fn do_open_data_v3(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        cmd_tx: &mpsc::Sender<MasterCmd>,
         event_tx: &EventSender,
         idcode: &str,
     ) -> bool {
@@ -748,9 +763,10 @@ impl MasterStation {
 
         let sessions2 = sessions.clone();
         let event_tx2 = event_tx.clone();
+        let cmd_tx2 = cmd_tx.clone();
         let idcode2 = idcode.to_string();
         tokio::spawn(async move {
-            Self::data_read_loop_outbound(idcode2, session_uid, sessions2, event_tx2).await;
+            Self::data_read_loop_outbound(idcode2, session_uid, sessions2, cmd_tx2, event_tx2).await;
         });
         true
     }
@@ -763,6 +779,7 @@ impl MasterStation {
         idcode: String,
         my_uid: u64,
         sessions: Arc<RwLock<HashMap<String, SubStationSession>>>,
+        cmd_tx: mpsc::Sender<MasterCmd>,
         event_tx: EventSender,
     ) {
         // Take the reader and snapshot the CFG dims under one lock so the
@@ -812,6 +829,45 @@ impl MasterStation {
             let (format_flags, phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0, 0));
 
             if let Ok(Frame::Data(df)) = parse(&frame_data, format_flags, phnmr, annmr, dgnmr) {
+                // STAT bit10 = "子站配置在最近 1 min 内发生改变" (§8.11 表
+                // 12). Cached dims are now stale — once latched we
+                // re-run auto_handshake to pull a fresh CFG-1/CFG-2 and
+                // refresh dims. cfg_change_seen avoids spamming the
+                // handshake every frame until the flag clears.
+                let cfg_changed = (df.stat & 0x0400) != 0;
+                if cfg_changed {
+                    let should_refresh = {
+                        let mut sessions_w = sessions.write().await;
+                        match sessions_w.get_mut(&idcode).filter(|s| s.uid == my_uid) {
+                            Some(s) if !s.cfg_change_seen => {
+                                s.cfg_change_seen = true;
+                                true
+                            }
+                            _ => false,
+                        }
+                    };
+                    if should_refresh {
+                        emit_event(&event_tx, PmuEvent::Error {
+                            idcode: idcode.clone(),
+                            error: "子站宣告配置变更 (STAT bit10),重新召唤 CFG…".into(),
+                        });
+                        // Re-enqueue handshake through command_loop instead
+                        // of spawning here — that path is single-threaded
+                        // and Send-safe; spawning do_auto_handshake from a
+                        // data-pipe task would require a Send bound on the
+                        // RwLock guards it holds across awaits.
+                        let _ = cmd_tx.try_send(MasterCmd::AutoHandshake {
+                            idcode: idcode.clone(),
+                            period: None,
+                        });
+                        // Force dims re-fetch on the next iteration so the
+                        // new CFG-2 takes effect immediately. cfg_change_seen
+                        // is reset by the AutoHandshake completion path
+                        // (do_auto_handshake clears it at the end).
+                        dims = None;
+                    }
+                }
+
                 emit_event(
                     &event_tx,
                     PmuEvent::DataFrame {
@@ -1095,17 +1151,43 @@ impl MasterStation {
             }
         };
 
-        let mut sessions_w = sessions.write().await;
-        if let Some(session) = sessions_w.get_mut(idcode) {
-            if let Some(writer) = session.mgmt_writer.as_mut() {
-                if let Err(e) = writer.write_all(&raw).await {
-                    error!("Failed to send command to {idcode}: {e}");
-                    return;
-                }
-                let _ = writer.flush().await;
+        let write_err: Option<String> = {
+            let mut sessions_w = sessions.write().await;
+            match sessions_w.get_mut(idcode) {
+                Some(session) => match session.mgmt_writer.as_mut() {
+                    Some(writer) => match writer.write_all(&raw).await {
+                        Ok(()) => {
+                            let _ = writer.flush().await;
+                            None
+                        }
+                        Err(e) => Some(e.to_string()),
+                    },
+                    None => Some("Management pipe vanished mid-send".into()),
+                },
+                None => Some("Session removed during send".into()),
             }
+        };
+
+        if let Some(err) = write_err {
+            // Tear the session down now so heartbeat_loop + the UI stop
+            // pretending it's alive — without this we kept the session
+            // in Streaming/Cfg2Sent until mgmt_read_loop eventually
+            // noticed EOF, leaking false "online" status for seconds.
+            error!("write_all to {idcode} failed: {err}");
+            let mut sessions_w = sessions.write().await;
+            if let Some(session) = sessions_w.get_mut(idcode) {
+                session.close();
+            }
+            drop(sessions_w);
+            emit_event(event_tx, PmuEvent::Error {
+                idcode: idcode.to_string(),
+                error: format!("命令发送失败,管道已关闭: {err}"),
+            });
+            emit_event(event_tx, PmuEvent::SessionDisconnected {
+                idcode: idcode.to_string(),
+            });
+            return;
         }
-        drop(sessions_w);
 
         emit_event(
             event_tx,
@@ -1154,6 +1236,31 @@ impl MasterStation {
                     return;
                 }
             };
+
+            // §6 "主站宜具有 CFG1/CFG2 校验机制": every block must have
+            // channel_names.len() == phnmr + annmr + 16*dgnmr, otherwise
+            // build_config silently produces a misaligned frame the
+            // substation will CRC-fail and drop, leaving the handshake
+            // deadlocked with no diagnostic.
+            let blocks_to_check: Vec<_> = if cfg1.pmu_blocks.is_empty() {
+                vec![(cfg1.phnmr, cfg1.annmr, cfg1.dgnmr, cfg1.channel_names.len())]
+            } else {
+                cfg1.pmu_blocks.iter()
+                    .map(|b| (b.phnmr, b.annmr, b.dgnmr, b.channel_names.len()))
+                    .collect()
+            };
+            for (i, (phnmr, annmr, dgnmr, names_len)) in blocks_to_check.iter().enumerate() {
+                let expected = *phnmr as usize + *annmr as usize + (*dgnmr as usize) * 16;
+                if *names_len != expected {
+                    emit_event(event_tx, PmuEvent::Error {
+                        idcode: idcode.to_string(),
+                        error: format!(
+                            "CFG-1 PMU#{i} 通道名个数不符: 期望 {expected}(PHNMR={phnmr}+ANNMR={annmr}+16×DGNMR={dgnmr}),实际 {names_len};拒绝下传 CFG-2"
+                        ),
+                    });
+                    return;
+                }
+            }
 
             // Carry forward every PMU block from cfg1; only PMU #0 takes
             // the user-supplied PERIOD override (the others keep their
@@ -1317,6 +1424,7 @@ impl MasterStation {
     /// idcode via peer_host:peer_mgmt_port before each subsequent step.
     async fn do_auto_handshake(
         sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        cmd_tx: &mpsc::Sender<MasterCmd>,
         event_tx: &EventSender,
         idcode: &str,
         period: Option<u16>,
@@ -1397,7 +1505,7 @@ impl MasterStation {
         // so the pipe needs to exist first or initial frames are lost. If the
         // V3 data pipe fails (timeout/refused), skip OpenData — do_open_data_v3
         // already emitted an Error event and StreamingStarted would lie.
-        if !Self::do_open_data_v3(sessions, event_tx, &current).await {
+        if !Self::do_open_data_v3(sessions, cmd_tx, event_tx, &current).await {
             return;
         }
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::OpenData as u16).await;
@@ -1405,6 +1513,9 @@ impl MasterStation {
             let mut sessions_w = sessions.write().await;
             if let Some(session) = sessions_w.get_mut(&current) {
                 session.state = SessionState::Streaming;
+                // Clear the STAT bit10 latch so the next config-change
+                // observation can re-trigger a refresh handshake.
+                session.cfg_change_seen = false;
             }
         }
         emit_event(
