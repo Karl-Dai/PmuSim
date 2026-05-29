@@ -49,6 +49,7 @@ fn make_cfg(cfg_type: u8) -> ConfigFrame {
         digunit: vec![(0x0001, 0x0000)],
         fnom: 0x0001,
         period: 100,
+        pmu_blocks: vec![],
     }
 }
 

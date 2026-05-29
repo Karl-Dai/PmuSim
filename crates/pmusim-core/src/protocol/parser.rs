@@ -133,59 +133,72 @@ fn parse_config(data: &[u8], version: ProtocolVersion, frame_type: FrameType) ->
         }
     };
 
-    // Parse PMU data block (first PMU only for now)
+    // Parse each PMU data block. Per V3 §8.2 layout repeats NUM_PMU
+    // times; the per-PMU FNOM+PERIOD live at the end of each block, so
+    // we must walk all blocks even if the caller only cares about #0.
     let mut off = pmu_start;
-
-    let stn = decode_gbk(&data[off..off + 16]);
-    off += 16;
-
-    let pmu_idcode = decode_ascii(&data[off..off + 8]);
-    off += 8;
-
-    let format_flags = read_u16(data, off);
-    off += 2;
-
-    let phnmr = read_u16(data, off);
-    off += 2;
-    let annmr = read_u16(data, off);
-    off += 2;
-    let dgnmr = read_u16(data, off);
-    off += 2;
-
-    let total_channels = phnmr as usize + annmr as usize + dgnmr as usize * 16;
-    let mut channel_names = Vec::with_capacity(total_channels);
-    for _ in 0..total_channels {
-        channel_names.push(decode_gbk(&data[off..off + 16]));
+    let mut blocks: Vec<PmuBlock> = Vec::with_capacity(num_pmu as usize);
+    for _ in 0..num_pmu {
+        let stn = decode_gbk(&data[off..off + 16]);
         off += 16;
+        let pmu_idcode = decode_ascii(&data[off..off + 8]);
+        off += 8;
+        let format_flags = read_u16(data, off);
+        off += 2;
+        let phnmr = read_u16(data, off);
+        off += 2;
+        let annmr = read_u16(data, off);
+        off += 2;
+        let dgnmr = read_u16(data, off);
+        off += 2;
+
+        let total_channels = phnmr as usize + annmr as usize + dgnmr as usize * 16;
+        let mut channel_names = Vec::with_capacity(total_channels);
+        for _ in 0..total_channels {
+            channel_names.push(decode_gbk(&data[off..off + 16]));
+            off += 16;
+        }
+        let mut phunit = Vec::with_capacity(phnmr as usize);
+        for _ in 0..phnmr {
+            phunit.push(read_u32(data, off));
+            off += 4;
+        }
+        let mut anunit = Vec::with_capacity(annmr as usize);
+        for _ in 0..annmr {
+            anunit.push(read_u32(data, off));
+            off += 4;
+        }
+        let mut digunit = Vec::with_capacity(dgnmr as usize);
+        for _ in 0..dgnmr {
+            let hi = read_u16(data, off);
+            let lo = read_u16(data, off + 2);
+            digunit.push((hi, lo));
+            off += 4;
+        }
+        let fnom = read_u16(data, off);
+        off += 2;
+        let period = read_u16(data, off);
+        off += 2;
+
+        blocks.push(PmuBlock {
+            stn, pmu_idcode, format_flags, phnmr, annmr, dgnmr,
+            channel_names, phunit, anunit, digunit, fnom, period,
+        });
     }
 
-    let mut phunit = Vec::with_capacity(phnmr as usize);
-    for _ in 0..phnmr {
-        phunit.push(read_u32(data, off));
-        off += 4;
-    }
-
-    let mut anunit = Vec::with_capacity(annmr as usize);
-    for _ in 0..annmr {
-        anunit.push(read_u32(data, off));
-        off += 4;
-    }
-
-    let mut digunit = Vec::with_capacity(dgnmr as usize);
-    for _ in 0..dgnmr {
-        let hi = read_u16(data, off);
-        let lo = read_u16(data, off + 2);
-        digunit.push((hi, lo));
-        off += 4;
-    }
-
-    let fnom = read_u16(data, off);
-    off += 2;
-    let period = read_u16(data, off);
+    // After all NUM_PMU blocks the V3 spec puts CHK only — there is no
+    // top-level FNOM/PERIOD; those are per-PMU. The convenience copies
+    // on ConfigFrame mirror block #0.
+    let first = blocks.first().cloned().unwrap_or(PmuBlock {
+        stn: String::new(), pmu_idcode: String::new(), format_flags: 0,
+        phnmr: 0, annmr: 0, dgnmr: 0,
+        channel_names: vec![], phunit: vec![], anunit: vec![], digunit: vec![],
+        fnom: 0, period: 0,
+    });
 
     // V2: primary idcode comes from per-PMU field; V3: from DC_IDCODE in header
     let primary_idcode = match version {
-        ProtocolVersion::V2 => pmu_idcode.clone(),
+        ProtocolVersion::V2 => first.pmu_idcode.clone(),
         ProtocolVersion::V3 => idcode,
     };
 
@@ -198,18 +211,19 @@ fn parse_config(data: &[u8], version: ProtocolVersion, frame_type: FrameType) ->
         d_frame,
         meas_rate,
         num_pmu,
-        stn,
-        pmu_idcode,
-        format_flags,
-        phnmr,
-        annmr,
-        dgnmr,
-        channel_names,
-        phunit,
-        anunit,
-        digunit,
-        fnom,
-        period,
+        stn: first.stn.clone(),
+        pmu_idcode: first.pmu_idcode.clone(),
+        format_flags: first.format_flags,
+        phnmr: first.phnmr,
+        annmr: first.annmr,
+        dgnmr: first.dgnmr,
+        channel_names: first.channel_names.clone(),
+        phunit: first.phunit.clone(),
+        anunit: first.anunit.clone(),
+        digunit: first.digunit.clone(),
+        fnom: first.fnom,
+        period: first.period,
+        pmu_blocks: blocks,
     }))
 }
 
@@ -464,6 +478,68 @@ mod tests {
             assert_eq!(df.format_flags, 0b1110);
         } else {
             panic!("expected Data frame");
+        }
+    }
+
+    /// NUM_PMU > 1 used to only parse the first block and lose channels
+    /// 2..n. Verify roundtrip preserves every block exactly.
+    #[test]
+    fn v3_config_multi_pmu_roundtrip() {
+        use crate::protocol::builder::build_config;
+        use crate::protocol::frame::{ConfigFrame, PmuBlock};
+        fn mk_block(idx: u16) -> PmuBlock {
+            let annmr = 2u16;
+            let dgnmr = 1u16;
+            let mut channel_names: Vec<String> = (0..annmr).map(|i| format!("PMU{idx}_AN{i}")).collect();
+            for j in 0..(dgnmr * 16) { channel_names.push(format!("PMU{idx}_DG{j:02}")); }
+            PmuBlock {
+                stn: format!("Station{idx}"),
+                pmu_idcode: format!("PMU{idx:05}"),
+                format_flags: 0,
+                phnmr: 0, annmr, dgnmr,
+                channel_names,
+                phunit: vec![],
+                anunit: vec![1000 + idx as u32, 2000 + idx as u32],
+                digunit: vec![(0x000F, 0x0000)],
+                fnom: 0x0001,
+                period: 50 + idx,
+            }
+        }
+        let frame = ConfigFrame {
+            version: ProtocolVersion::V3,
+            cfg_type: 2,
+            idcode: "DC_PMU00".into(),
+            soc: 0x67B2C719,
+            fracsec: 0,
+            d_frame: 0,
+            meas_rate: 1_000_000,
+            num_pmu: 3,
+            // top-level convenience fields will be overwritten by parser
+            stn: String::new(), pmu_idcode: String::new(),
+            format_flags: 0, phnmr: 0, annmr: 0, dgnmr: 0,
+            channel_names: vec![], phunit: vec![], anunit: vec![], digunit: vec![],
+            fnom: 0, period: 0,
+            pmu_blocks: vec![mk_block(0), mk_block(1), mk_block(2)],
+        };
+        let bytes = build_config(&frame).unwrap();
+        let parsed = parse(&bytes, 0, 0, 0, 0).unwrap();
+        if let Frame::Config(cfg) = parsed {
+            assert_eq!(cfg.num_pmu, 3);
+            assert_eq!(cfg.pmu_blocks.len(), 3);
+            for (i, b) in cfg.pmu_blocks.iter().enumerate() {
+                let expected = mk_block(i as u16);
+                assert_eq!(b.stn, expected.stn, "STN @{i}");
+                assert_eq!(b.pmu_idcode, expected.pmu_idcode, "IDCODE @{i}");
+                assert_eq!(b.annmr, expected.annmr, "ANNMR @{i}");
+                assert_eq!(b.channel_names, expected.channel_names, "CHNAM @{i}");
+                assert_eq!(b.anunit, expected.anunit, "ANUNIT @{i}");
+                assert_eq!(b.period, expected.period, "PERIOD @{i}");
+            }
+            // Convenience fields mirror block 0
+            assert_eq!(cfg.stn, "Station0");
+            assert_eq!(cfg.period, 50);
+        } else {
+            panic!("expected Config frame");
         }
     }
 

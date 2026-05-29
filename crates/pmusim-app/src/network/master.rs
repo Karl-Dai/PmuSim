@@ -1155,6 +1155,17 @@ impl MasterStation {
                 }
             };
 
+            // Carry forward every PMU block from cfg1; only PMU #0 takes
+            // the user-supplied PERIOD override (the others keep their
+            // CFG-1 cadence). Without copying pmu_blocks the builder
+            // would fall back to the top-level convenience fields and
+            // silently downgrade a multi-PMU substation to one PMU.
+            let mut blocks = cfg1.pmu_blocks.clone();
+            if let Some(p) = period {
+                if let Some(first) = blocks.first_mut() {
+                    first.period = p;
+                }
+            }
             ConfigFrame {
                 version: cfg1.version,
                 cfg_type: FrameType::Cfg2 as u8,
@@ -1176,6 +1187,7 @@ impl MasterStation {
                 digunit: cfg1.digunit.clone(),
                 fnom: cfg1.fnom,
                 period: period.unwrap_or(cfg1.period),
+                pmu_blocks: blocks,
             }
         };
 

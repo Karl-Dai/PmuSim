@@ -9,16 +9,11 @@ pub struct CommandFrame {
     pub cmd: u16,
 }
 
+/// One PMU's worth of CFG fields. A V3 config frame can carry NUM_PMU of
+/// these per spec §8.2 — earlier code only ever decoded the first block,
+/// so any substation reporting NUM_PMU > 1 silently lost channels 2..n.
 #[derive(Debug, Clone)]
-pub struct ConfigFrame {
-    pub version: ProtocolVersion,
-    pub cfg_type: u8,
-    pub idcode: String,
-    pub soc: u32,
-    pub fracsec: u32,
-    pub d_frame: u16,
-    pub meas_rate: u32,
-    pub num_pmu: u16,
+pub struct PmuBlock {
     pub stn: String,
     pub pmu_idcode: String,
     pub format_flags: u16,
@@ -31,6 +26,38 @@ pub struct ConfigFrame {
     pub digunit: Vec<(u16, u16)>,
     pub fnom: u16,
     pub period: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigFrame {
+    pub version: ProtocolVersion,
+    pub cfg_type: u8,
+    pub idcode: String,
+    pub soc: u32,
+    pub fracsec: u32,
+    pub d_frame: u16,
+    pub meas_rate: u32,
+    pub num_pmu: u16,
+    /// First-PMU convenience copies. Kept in sync with `pmu_blocks[0]`
+    /// by the parser so existing consumers (Tauri ConfigInfo, frontend
+    /// table) work unchanged. To handle multi-PMU substations, read
+    /// `pmu_blocks` directly.
+    pub stn: String,
+    pub pmu_idcode: String,
+    pub format_flags: u16,
+    pub phnmr: u16,
+    pub annmr: u16,
+    pub dgnmr: u16,
+    pub channel_names: Vec<String>,
+    pub phunit: Vec<u32>,
+    pub anunit: Vec<u32>,
+    pub digunit: Vec<(u16, u16)>,
+    pub fnom: u16,
+    pub period: u16,
+    /// All PMU blocks in this CFG frame, indexed by PMU position. Length
+    /// equals `num_pmu` after parsing. For building, an empty vec falls
+    /// back to constructing one block from the convenience fields.
+    pub pmu_blocks: Vec<PmuBlock>,
 }
 
 impl ConfigFrame {

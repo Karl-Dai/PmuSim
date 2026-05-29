@@ -83,31 +83,49 @@ pub fn build_config(frame: &ConfigFrame) -> Result<Vec<u8>> {
 
     let sync = make_sync(ft, frame.version);
 
-    // Build PMU data block
+    // Source of truth: pmu_blocks[] if non-empty, else fall back to the
+    // top-level convenience fields wrapped as one block. This keeps
+    // existing call sites that build ConfigFrame { stn, annmr, ... }
+    // working unchanged.
+    let blocks: Vec<PmuBlock> = if !frame.pmu_blocks.is_empty() {
+        frame.pmu_blocks.clone()
+    } else {
+        vec![PmuBlock {
+            stn: frame.stn.clone(),
+            pmu_idcode: frame.pmu_idcode.clone(),
+            format_flags: frame.format_flags,
+            phnmr: frame.phnmr,
+            annmr: frame.annmr,
+            dgnmr: frame.dgnmr,
+            channel_names: frame.channel_names.clone(),
+            phunit: frame.phunit.clone(),
+            anunit: frame.anunit.clone(),
+            digunit: frame.digunit.clone(),
+            fnom: frame.fnom,
+            period: frame.period,
+        }]
+    };
+    let num_pmu = blocks.len() as u16;
+
     let mut pmu_block = Vec::new();
-    pmu_block.extend_from_slice(&encode_gbk_padded(&frame.stn, STN_LEN));
-    pmu_block.extend_from_slice(&encode_ascii_padded(&frame.pmu_idcode, IDCODE_LEN));
-    write_u16(&mut pmu_block, frame.format_flags);
-    write_u16(&mut pmu_block, frame.phnmr);
-    write_u16(&mut pmu_block, frame.annmr);
-    write_u16(&mut pmu_block, frame.dgnmr);
-
-    for name in &frame.channel_names {
-        pmu_block.extend_from_slice(&encode_gbk_padded(name, CHNAM_LEN));
+    for b in &blocks {
+        pmu_block.extend_from_slice(&encode_gbk_padded(&b.stn, STN_LEN));
+        pmu_block.extend_from_slice(&encode_ascii_padded(&b.pmu_idcode, IDCODE_LEN));
+        write_u16(&mut pmu_block, b.format_flags);
+        write_u16(&mut pmu_block, b.phnmr);
+        write_u16(&mut pmu_block, b.annmr);
+        write_u16(&mut pmu_block, b.dgnmr);
+        for name in &b.channel_names {
+            pmu_block.extend_from_slice(&encode_gbk_padded(name, CHNAM_LEN));
+        }
+        for &u in &b.phunit { write_u32(&mut pmu_block, u); }
+        for &u in &b.anunit { write_u32(&mut pmu_block, u); }
+        for &(hi, lo) in &b.digunit {
+            write_u32(&mut pmu_block, ((hi as u32) << 16) | (lo as u32 & 0xFFFF));
+        }
+        write_u16(&mut pmu_block, b.fnom);
+        write_u16(&mut pmu_block, b.period);
     }
-
-    for &u in &frame.phunit {
-        write_u32(&mut pmu_block, u);
-    }
-    for &u in &frame.anunit {
-        write_u32(&mut pmu_block, u);
-    }
-    for &(hi, lo) in &frame.digunit {
-        write_u32(&mut pmu_block, ((hi as u32) << 16) | (lo as u32 & 0xFFFF));
-    }
-
-    write_u16(&mut pmu_block, frame.fnom);
-    write_u16(&mut pmu_block, frame.period);
 
     // Build header
     let mut buf = Vec::new();
@@ -119,14 +137,14 @@ pub fn build_config(frame: &ConfigFrame) -> Result<Vec<u8>> {
             write_u32(&mut buf, frame.soc);
             write_u16(&mut buf, frame.d_frame);
             write_u32(&mut buf, frame.meas_rate);
-            write_u16(&mut buf, frame.num_pmu);
+            write_u16(&mut buf, num_pmu);
         }
         ProtocolVersion::V3 => {
             buf.extend_from_slice(&encode_ascii_padded(&frame.idcode, IDCODE_LEN));
             write_u32(&mut buf, frame.soc);
             write_u32(&mut buf, frame.fracsec);
             write_u32(&mut buf, frame.meas_rate);
-            write_u16(&mut buf, frame.num_pmu);
+            write_u16(&mut buf, num_pmu);
         }
     }
 
@@ -326,6 +344,7 @@ mod tests {
             digunit: vec![(0x0001, 0x0000)],
             fnom: 0x0001,
             period: 100,
+            pmu_blocks: vec![],
         };
 
         let data = build_config(&frame).unwrap();
