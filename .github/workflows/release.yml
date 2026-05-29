@@ -25,7 +25,20 @@ jobs:
           - platform: windows-latest
             args: ''
             rust_target: ''
+          # Windows on ARM. Cross-compiled on the x64 runner; NSIS only —
+          # arm64 WiX/MSI is flaky and a single failing matrix job would mark
+          # the whole `release` job failed, skipping publish-manifest and
+          # leaving the release stuck as a draft. NSIS gives the requested
+          # `PmuSim_<ver>_arm64-setup.exe` plus its updater .sig.
+          - platform: windows-latest
+            args: '--target aarch64-pc-windows-msvc --bundles nsis'
+            rust_target: aarch64-pc-windows-msvc
+            experimental: true
     runs-on: ${{ matrix.platform }}
+    # First-time arm64 cross-compile: keep it non-blocking so a failure on this
+    # leg can't fail the whole `release` job (which would skip publish-manifest
+    # and leave the release stuck as a draft). The other platforms still ship.
+    continue-on-error: ${{ matrix.experimental || false }}
 
     steps:
       - uses: actions/checkout@v4

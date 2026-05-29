@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-29
+
+### Highlights / 亮点
+
+- 🪟 新增 Windows on ARM (aarch64) 原生安装包, ARM 设备不再依赖 x64 仿真, 且同样支持应用内自动更新 / Native Windows on ARM (aarch64) installer — ARM devices no longer rely on x64 emulation and get in-app auto-update too.
+
+### Added 新增
+
+- Windows on ARM (aarch64) NSIS 安装包: release 矩阵新增 `aarch64-pc-windows-msvc` 交叉编译, 产出 `PmuSim_<ver>_arm64-setup.exe` 并纳入 `windows-aarch64` updater manifest / Windows on ARM (aarch64) NSIS installer: the release matrix now cross-compiles `aarch64-pc-windows-msvc`, producing `PmuSim_<ver>_arm64-setup.exe` and registering it under the `windows-aarch64` updater key.
+
+### Internal 内部
+
+- arm64 矩阵 leg 设为 `continue-on-error`(首次交叉编译容错): 该 leg 失败也不会拖垮其余平台发版或把 release 卡在 draft / The arm64 matrix leg is `continue-on-error` (first cross-compile, fault-tolerant) so its failure can't block the other platforms or leave the release stuck as a draft.
+
 ## [0.3.0] - 2026-05-28
 
 ### Highlights / 亮点

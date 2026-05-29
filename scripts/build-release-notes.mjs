@@ -36,6 +36,7 @@ const PLATFORMS = [
   { label: 'macOS Intel',         file: (v) => `PmuSim_${v}_x64.dmg` },
   { label: 'Windows x64 (NSIS)',  file: (v) => `PmuSim_${v}_x64-setup.exe` },
   { label: 'Windows x64 (MSI)',   file: (v) => `PmuSim_${v}_x64_en-US.msi` },
+  { label: 'Windows ARM64 (NSIS)', file: (v) => `PmuSim_${v}_arm64-setup.exe` },
   { label: 'Linux AppImage',      file: (v) => `PmuSim_${v}_amd64.AppImage` },
   { label: 'Linux deb',           file: (v) => `PmuSim_${v}_amd64.deb` },
   { label: 'Linux rpm',           file: (v) => `PmuSim-${v}-1.x86_64.rpm` },

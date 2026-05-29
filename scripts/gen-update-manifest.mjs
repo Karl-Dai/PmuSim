@@ -9,10 +9,12 @@ const REPO = 'Karl-Dai/PmuSim'
 //   - macOS: <name>_<arch>.app.tar.gz (no version in name)
 //   - Linux: <name>_<ver>_amd64.AppImage (AppImage itself, NOT a tar.gz)
 //   - Windows: <name>_<ver>_x64-setup.exe (NSIS installer itself, NOT a .nsis.zip)
+//     ARM64 is named <name>_<ver>_arm64-setup.exe by the same bundler.
 const PLATFORM_PATTERNS = [
   { key: 'darwin-aarch64', re: /_aarch64\.app\.tar\.gz$/ },
   { key: 'darwin-x86_64',  re: /_x64\.app\.tar\.gz$/ },
   { key: 'windows-x86_64', re: /_x64-setup\.exe$/ },
+  { key: 'windows-aarch64', re: /_arm64-setup\.exe$/ },
   { key: 'linux-x86_64',   re: /_amd64\.AppImage$/ },
 ]
 
