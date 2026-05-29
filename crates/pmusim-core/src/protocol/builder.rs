@@ -15,6 +15,10 @@ fn write_i16(buf: &mut Vec<u8>, val: i16) {
     buf.extend_from_slice(&val.to_be_bytes());
 }
 
+fn write_f32(buf: &mut Vec<u8>, val: f32) {
+    buf.extend_from_slice(&val.to_be_bytes());
+}
+
 fn encode_ascii_padded(s: &str, len: usize) -> Vec<u8> {
     let mut buf = s.as_bytes().to_vec();
     buf.resize(len, 0);
@@ -156,17 +160,37 @@ pub fn build_data(frame: &DataFrame, _phnmr: u16, _annmr: u16, _dgnmr: u16) -> R
         }
     }
 
-    for &(mag, ang) in &frame.phasors {
-        write_i16(&mut buf, mag);
-        write_i16(&mut buf, ang);
+    // Encode width per FORMAT bits 1-3 (§8.5 表 8). int16 keeps backward
+    // compatibility with V2 fixtures; float mode uses big-endian IEEE-754.
+    let phasor_float = DataFrame::phasors_are_float(frame.format_flags);
+    let analog_float = DataFrame::analog_is_float(frame.format_flags);
+    let freq_float = DataFrame::freq_is_float(frame.format_flags);
+
+    for &(a, b) in &frame.phasors {
+        if phasor_float {
+            write_f32(&mut buf, a as f32);
+            write_f32(&mut buf, b as f32);
+        } else {
+            write_i16(&mut buf, a as i16);
+            write_i16(&mut buf, b as i16);
+        }
     }
 
-    // FREQ and DFREQ written as u16 (matching Python builder's ">HH")
-    write_u16(&mut buf, frame.freq as u16);
-    write_u16(&mut buf, frame.dfreq as u16);
+    if freq_float {
+        write_f32(&mut buf, frame.freq as f32);
+        write_f32(&mut buf, frame.dfreq as f32);
+    } else {
+        // i16 cast — V3 sample data carries 0 here so wrap semantics are OK
+        write_i16(&mut buf, frame.freq as i16);
+        write_i16(&mut buf, frame.dfreq as i16);
+    }
 
-    for &a in &frame.analog {
-        write_i16(&mut buf, a);
+    for &v in &frame.analog {
+        if analog_float {
+            write_f32(&mut buf, v as f32);
+        } else {
+            write_i16(&mut buf, v as i16);
+        }
     }
     for &d in &frame.digital {
         write_u16(&mut buf, d);
@@ -223,7 +247,7 @@ mod tests {
             cmd: 0x0002,
         };
         let data = build_command(&frame).unwrap();
-        let parsed = parse(&data, 0, 0, 0).unwrap();
+        let parsed = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Command(cmd) = parsed {
             assert_eq!(cmd.version, frame.version);
             assert_eq!(cmd.idcode, frame.idcode);
@@ -242,17 +266,18 @@ mod tests {
             soc: 0x67A99D11,
             fracsec: 0x000D9490,
             stat: 0x0000,
-            phasors: vec![(100, -50), (200, 30)],
-            freq: 0,
-            dfreq: 0,
-            analog: vec![300, 3000, 9175],
+            format_flags: 0,
+            phasors: vec![(100.0, -50.0), (200.0, 30.0)],
+            freq: 0.0,
+            dfreq: 0.0,
+            analog: vec![300.0, 3000.0, 9175.0],
             digital: vec![0x000A],
         };
         let phnmr = 2u16;
         let annmr = 3u16;
         let dgnmr = 1u16;
         let data = build_data(&frame, phnmr, annmr, dgnmr).unwrap();
-        let parsed = parse(&data, phnmr, annmr, dgnmr).unwrap();
+        let parsed = parse(&data, 0, phnmr, annmr, dgnmr).unwrap();
         if let Frame::Data(df) = parsed {
             assert_eq!(df.version, frame.version);
             assert_eq!(df.idcode, frame.idcode);
@@ -304,7 +329,7 @@ mod tests {
         };
 
         let data = build_config(&frame).unwrap();
-        let parsed = parse(&data, 0, 0, 0).unwrap();
+        let parsed = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Config(cfg) = parsed {
             assert_eq!(cfg.version, frame.version);
             assert_eq!(cfg.cfg_type, frame.cfg_type);
@@ -334,7 +359,7 @@ mod tests {
             "aa02002c67a99d11000d9490000000000000012c0bb823d700c8000000000000000023d700000000000a21f3",
         )
         .unwrap();
-        let parsed = parse(&known, 0, 11, 1).unwrap();
+        let parsed = parse(&known, 0, 0, 11, 1).unwrap();
         if let Frame::Data(df) = parsed {
             let rebuilt = build_data(&df, 0, 11, 1).unwrap();
             assert_eq!(rebuilt, known);
@@ -349,7 +374,7 @@ mod tests {
             "aa030034304758303047503167b2c71d000000000000000000000190012c23e10000000000000000000023e100000000000ae884",
         )
         .unwrap();
-        let parsed = parse(&known, 0, 11, 1).unwrap();
+        let parsed = parse(&known, 0, 0, 11, 1).unwrap();
         if let Frame::Data(df) = parsed {
             let rebuilt = build_data(&df, 0, 11, 1).unwrap();
             assert_eq!(rebuilt, known);

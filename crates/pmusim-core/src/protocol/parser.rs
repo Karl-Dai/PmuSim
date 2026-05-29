@@ -15,6 +15,10 @@ fn read_i16(data: &[u8], off: usize) -> i16 {
     i16::from_be_bytes([data[off], data[off + 1]])
 }
 
+fn read_f32(data: &[u8], off: usize) -> f32 {
+    f32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+}
+
 fn decode_ascii(data: &[u8]) -> String {
     String::from_utf8_lossy(data)
         .trim_end_matches('\0')
@@ -26,7 +30,19 @@ fn decode_gbk(data: &[u8]) -> String {
     cow.trim_end_matches('\0').to_string()
 }
 
-pub fn parse(data: &[u8], phnmr: u16, annmr: u16, dgnmr: u16) -> Result<Frame> {
+/// Parse a single frame.
+///
+/// `format_flags` is the FORMAT word from the matching CFG-2 — only used
+/// when decoding a Data frame; pass 0 for command/config frames or when
+/// you don't have CFG-2 yet (data fields will then be decoded as int16
+/// per spec default).
+pub fn parse(
+    data: &[u8],
+    format_flags: u16,
+    phnmr: u16,
+    annmr: u16,
+    dgnmr: u16,
+) -> Result<Frame> {
     if data.len() < 4 {
         return Err(PmuError::Parse("Frame too short".into()));
     }
@@ -56,7 +72,7 @@ pub fn parse(data: &[u8], phnmr: u16, annmr: u16, dgnmr: u16) -> Result<Frame> {
     match frame_type {
         FrameType::Command => parse_command(data, version),
         FrameType::Cfg1 | FrameType::Cfg2 => parse_config(data, version, frame_type),
-        FrameType::Data => parse_data(data, version, phnmr, annmr, dgnmr),
+        FrameType::Data => parse_data(data, version, format_flags, phnmr, annmr, dgnmr),
     }
 }
 
@@ -200,6 +216,7 @@ fn parse_config(data: &[u8], version: ProtocolVersion, frame_type: FrameType) ->
 fn parse_data(
     data: &[u8],
     version: ProtocolVersion,
+    format_flags: u16,
     phnmr: u16,
     annmr: u16,
     dgnmr: u16,
@@ -222,23 +239,50 @@ fn parse_data(
 
     let mut off = val_start;
 
+    let phasor_float = DataFrame::phasors_are_float(format_flags);
+    let analog_float = DataFrame::analog_is_float(format_flags);
+    let freq_float = DataFrame::freq_is_float(format_flags);
+
     let mut phasors = Vec::with_capacity(phnmr as usize);
     for _ in 0..phnmr {
-        let mag = read_i16(data, off);
-        let angle = read_i16(data, off + 2);
-        phasors.push((mag, angle));
-        off += 4;
+        let (a, b) = if phasor_float {
+            let a = read_f32(data, off) as f64;
+            let b = read_f32(data, off + 4) as f64;
+            off += 8;
+            (a, b)
+        } else {
+            let a = read_i16(data, off) as f64;
+            let b = read_i16(data, off + 2) as f64;
+            off += 4;
+            (a, b)
+        };
+        phasors.push((a, b));
     }
 
-    let freq = read_i16(data, off);
-    off += 2;
-    let dfreq = read_i16(data, off);
-    off += 2;
+    let (freq, dfreq) = if freq_float {
+        let f = read_f32(data, off) as f64;
+        let df = read_f32(data, off + 4) as f64;
+        off += 8;
+        (f, df)
+    } else {
+        let f = read_i16(data, off) as f64;
+        let df = read_i16(data, off + 2) as f64;
+        off += 4;
+        (f, df)
+    };
 
     let mut analog = Vec::with_capacity(annmr as usize);
     for _ in 0..annmr {
-        analog.push(read_i16(data, off));
-        off += 2;
+        let v = if analog_float {
+            let v = read_f32(data, off) as f64;
+            off += 4;
+            v
+        } else {
+            let v = read_i16(data, off) as f64;
+            off += 2;
+            v
+        };
+        analog.push(v);
     }
 
     let mut digital = Vec::with_capacity(dgnmr as usize);
@@ -253,6 +297,7 @@ fn parse_data(
         soc,
         fracsec,
         stat,
+        format_flags,
         phasors,
         freq,
         dfreq,
@@ -269,7 +314,7 @@ mod tests {
     #[test]
     fn v2_request_cfg1() {
         let data = hex::decode("aa4200146757dd1d30475830304750310004a5cb").unwrap();
-        let frame = parse(&data, 0, 0, 0).unwrap();
+        let frame = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Command(cmd) = frame {
             assert_eq!(cmd.version, ProtocolVersion::V2);
             assert_eq!(cmd.idcode, "0GX00GP1");
@@ -283,7 +328,7 @@ mod tests {
     #[test]
     fn v2_heartbeat() {
         let data = hex::decode("aa4200146757dd22304758303047503140009cf7").unwrap();
-        let frame = parse(&data, 0, 0, 0).unwrap();
+        let frame = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Command(cmd) = frame {
             assert_eq!(cmd.cmd, 0x4000);
         } else {
@@ -295,7 +340,7 @@ mod tests {
     fn v3_request_cfg1() {
         let data =
             hex::decode("aa430018304758303047503167b2c719000000000004ac08").unwrap();
-        let frame = parse(&data, 0, 0, 0).unwrap();
+        let frame = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Command(cmd) = frame {
             assert_eq!(cmd.version, ProtocolVersion::V3);
             assert_eq!(cmd.idcode, "0GX00GP1");
@@ -311,7 +356,7 @@ mod tests {
     fn v3_heartbeat() {
         let data =
             hex::decode("aa430018304758303047503167b2c71e000000004000f804").unwrap();
-        let frame = parse(&data, 0, 0, 0).unwrap();
+        let frame = parse(&data, 0, 0, 0, 0).unwrap();
         if let Frame::Command(cmd) = frame {
             assert_eq!(cmd.cmd, 0x4000);
         } else {
@@ -326,16 +371,16 @@ mod tests {
             "aa02002c67a99d11000d9490000000000000012c0bb823d700c8000000000000000023d700000000000a21f3",
         )
         .unwrap();
-        let frame = parse(&data, 0, 11, 1).unwrap();
+        let frame = parse(&data, 0, 0, 11, 1).unwrap();
         if let Frame::Data(df) = frame {
             assert_eq!(df.version, ProtocolVersion::V2);
             assert_eq!(df.idcode, "");
             assert_eq!(df.soc, 0x67A99D11);
             assert_eq!(df.fracsec, 0x000D9490);
             assert_eq!(df.analog.len(), 11);
-            assert_eq!(df.analog[0], 0x012C);
-            assert_eq!(df.analog[1], 0x0BB8);
-            assert_eq!(df.analog[2], 0x23D7);
+            assert_eq!(df.analog[0], 0x012C as f64);
+            assert_eq!(df.analog[1], 0x0BB8 as f64);
+            assert_eq!(df.analog[2], 0x23D7 as f64);
             assert_eq!(df.digital, vec![0x000A]);
         } else {
             panic!("Expected Data frame");
@@ -348,11 +393,11 @@ mod tests {
             "aa030034304758303047503167b2c71d000000000000000000000190012c23e10000000000000000000023e100000000000ae884",
         )
         .unwrap();
-        let frame = parse(&data, 0, 11, 1).unwrap();
+        let frame = parse(&data, 0, 0, 11, 1).unwrap();
         if let Frame::Data(df) = frame {
             assert_eq!(df.version, ProtocolVersion::V3);
             assert_eq!(df.idcode, "0GX00GP1");
-            assert_eq!(df.analog[0], 0x0190);
+            assert_eq!(df.analog[0], 0x0190 as f64);
         } else {
             panic!("Expected Data frame");
         }
@@ -361,13 +406,13 @@ mod tests {
     #[test]
     fn invalid_sync() {
         let data = hex::decode("bb4200146757dd1d30475830304750310004a5cb").unwrap();
-        assert!(parse(&data, 0, 0, 0).is_err());
+        assert!(parse(&data, 0, 0, 0, 0).is_err());
     }
 
     #[test]
     fn frame_too_short() {
         let data = hex::decode("aa42").unwrap();
-        assert!(parse(&data, 0, 0, 0).is_err());
+        assert!(parse(&data, 0, 0, 0, 0).is_err());
     }
 
     #[test]
@@ -377,6 +422,74 @@ mod tests {
         let len = data.len();
         data[len - 1] = 0xFF;
         data[len - 2] = 0xFF;
-        assert!(parse(&data, 0, 0, 0).is_err());
+        assert!(parse(&data, 0, 0, 0, 0).is_err());
+    }
+
+    /// FORMAT 0x000E = analog/phasors/freq all float. Build with the new
+    /// format flags, parse with the matching flags, and verify the
+    /// engineering values round-trip exactly (within float precision).
+    #[test]
+    fn v3_data_float_roundtrip() {
+        use crate::protocol::builder::build_data;
+        use crate::protocol::frame::DataFrame;
+        let frame = DataFrame {
+            version: ProtocolVersion::V3,
+            idcode: "FLOATPMU".into(),
+            soc: 0x67B2C719,
+            fracsec: 0,
+            stat: 0,
+            format_flags: 0b1110, // bit1+2+3 = phasor/analog/freq float
+            phasors: vec![(123.5, -45.25)],
+            freq: 50.123,
+            dfreq: -0.05,
+            analog: vec![3.14159, -2.71828],
+            digital: vec![0xBEEF],
+        };
+        let bytes = build_data(&frame, 0, 0, 0).unwrap();
+        // V3 data header is 20 bytes (sync+size+idcode+soc+fracsec).
+        // Float mode: 20 + 2 STAT + 1*8 phasor + 8 (f+df) + 2*4 analog
+        //           + 2 digital + 2 CRC = 50
+        assert_eq!(bytes.len(), 50);
+
+        let parsed = parse(&bytes, 0b1110, 1, 2, 1).unwrap();
+        if let Frame::Data(df) = parsed {
+            assert_eq!(df.idcode, "FLOATPMU");
+            assert!((df.phasors[0].0 - 123.5).abs() < 1e-3);
+            assert!((df.phasors[0].1 - -45.25).abs() < 1e-3);
+            assert!((df.freq - 50.123).abs() < 1e-3);
+            assert!((df.dfreq - -0.05).abs() < 1e-3);
+            assert!((df.analog[0] - 3.14159).abs() < 1e-4);
+            assert!((df.analog[1] - -2.71828).abs() < 1e-4);
+            assert_eq!(df.digital[0], 0xBEEF);
+            assert_eq!(df.format_flags, 0b1110);
+        } else {
+            panic!("expected Data frame");
+        }
+    }
+
+    /// Parsing a float-mode frame with int16 dims (format_flags=0) would
+    /// previously eat the wrong number of bytes — verify the new dispatch
+    /// keeps int16 path byte-accurate.
+    #[test]
+    fn v3_data_int_byte_widths() {
+        use crate::protocol::builder::build_data;
+        use crate::protocol::frame::DataFrame;
+        let frame = DataFrame {
+            version: ProtocolVersion::V3,
+            idcode: "INTPMU01".into(),
+            soc: 0,
+            fracsec: 0,
+            stat: 0,
+            format_flags: 0, // all int16
+            phasors: vec![(100.0, 200.0)],
+            freq: 10.0,
+            dfreq: -5.0,
+            analog: vec![1.0, 2.0],
+            digital: vec![0xABCD],
+        };
+        let bytes = build_data(&frame, 0, 0, 0).unwrap();
+        // V3 header 20 + STAT 2 + phasor 4 + freq+dfreq 4 + analog 4 +
+        // digital 2 + CRC 2 = 38
+        assert_eq!(bytes.len(), 38);
     }
 }

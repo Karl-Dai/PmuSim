@@ -41,9 +41,14 @@ pub struct DataInfo {
     pub soc: u32,
     pub fracsec: u32,
     pub stat: u16,
+    /// FORMAT bits 0-3 from the matching CFG-2 — frontend can use bit0
+    /// to decide phasor display (rectangular vs polar).
+    pub format_flags: u16,
+    pub freq: f64,
+    pub dfreq: f64,
     pub analog: Vec<f64>,
     pub digital: Vec<u16>,
-    pub phasors: Vec<(i16, i16)>,
+    pub phasors: Vec<(f64, f64)>,
 }
 
 impl From<&pmusim_core::protocol::frame::ConfigFrame> for ConfigInfo {

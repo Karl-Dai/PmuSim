@@ -346,7 +346,7 @@ impl MasterStation {
             let sessions_r = sessions.read().await;
             if let Some(session) = sessions_r.get(&session_idcode) {
                 if let Some(cfg2) = &session.cfg2 {
-                    if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
+                    if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
@@ -369,7 +369,7 @@ impl MasterStation {
             let sessions_r = sessions.read().await;
             if let Some(session) = sessions_r.get(&session_idcode) {
                 if let Some(cfg2) = &session.cfg2 {
-                    if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
+                    if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
@@ -781,7 +781,7 @@ impl MasterStation {
                 .cfg2
                 .as_ref()
                 .or(s.cfg1.as_ref())
-                .map(|c| (c.phnmr, c.annmr, c.dgnmr));
+                .map(|c| (c.format_flags, c.phnmr, c.annmr, c.dgnmr));
             (reader, dims)
         };
 
@@ -807,11 +807,11 @@ impl MasterStation {
                 dims = sessions_r
                     .get(&idcode)
                     .and_then(|s| s.cfg2.as_ref().or(s.cfg1.as_ref()))
-                    .map(|c| (c.phnmr, c.annmr, c.dgnmr));
+                    .map(|c| (c.format_flags, c.phnmr, c.annmr, c.dgnmr));
             }
-            let (phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0));
+            let (format_flags, phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0, 0));
 
-            if let Ok(Frame::Data(df)) = parse(&frame_data, phnmr, annmr, dgnmr) {
+            if let Ok(Frame::Data(df)) = parse(&frame_data, format_flags, phnmr, annmr, dgnmr) {
                 emit_event(
                     &event_tx,
                     PmuEvent::DataFrame {
@@ -872,7 +872,7 @@ impl MasterStation {
 
             let parsed = {
                 // For command/config frames, phnmr/annmr/dgnmr are not needed.
-                parse(&frame_data, 0, 0, 0).ok()
+                parse(&frame_data, 0, 0, 0, 0).ok()
             };
 
             // Re-key session on first real IDCODE.
@@ -1473,7 +1473,10 @@ fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo 
         soc: df.soc,
         fracsec: df.fracsec,
         stat: df.stat,
-        analog: df.analog.iter().map(|&v| v as f64).collect(),
+        format_flags: df.format_flags,
+        freq: df.freq,
+        dfreq: df.dfreq,
+        analog: df.analog.clone(),
         digital: df.digital.clone(),
         phasors: df.phasors.clone(),
     }

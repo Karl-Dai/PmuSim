@@ -59,10 +59,11 @@ fn make_data_frame(soc: u32) -> DataFrame {
         soc,
         fracsec: 0,
         stat: 0x0000,
+        format_flags: 0,
         phasors: vec![],
-        freq: 0,
-        dfreq: 0,
-        analog: vec![300, 3000],
+        freq: 0.0,
+        dfreq: 0.0,
+        analog: vec![300.0, 3000.0],
         digital: vec![0x000A],
     }
 }
@@ -173,7 +174,7 @@ async fn spawn_mock_substation(_master_data_port: u16) -> (u16, JoinHandle<()>, 
                 Ok(d) => d,
                 Err(_) => break,
             };
-            let parsed = parse(&frame_data, 0, 0, 0);
+            let parsed = parse(&frame_data, 0, 0, 0, 0);
             match parsed {
                 Ok(Frame::Command(cmd)) => match cmd.cmd {
                     c if c == Cmd::SendCfg1 as u16 => {
@@ -427,7 +428,7 @@ async fn v3_handshake_with_explicit_data_port() {
                 Ok(d) => d,
                 Err(_) => break,
             };
-            match parse(&frame_data, 0, 0, 0) {
+            match parse(&frame_data, 0, 0, 0, 0) {
                 Ok(Frame::Command(cmd)) => match cmd.cmd {
                     c if c == Cmd::SendCfg1 as u16 => {
                         writer.write_all(&build_config(&make_cfg(FrameType::Cfg1 as u8)).unwrap()).await.unwrap();
@@ -513,7 +514,7 @@ async fn v3_nack_on_send_cfg2_cmd_aborts_handshake() {
                 Ok(d) => d,
                 Err(_) => break,
             };
-            if let Ok(Frame::Command(cmd)) = parse(&frame_data, 0, 0, 0) {
+            if let Ok(Frame::Command(cmd)) = parse(&frame_data, 0, 0, 0, 0) {
                 if cmd.cmd == Cmd::SendCfg1 as u16 {
                     writer.write_all(&build_config(&make_cfg(FrameType::Cfg1 as u8)).unwrap()).await.unwrap();
                 } else if cmd.cmd == Cmd::SendCfg2Cmd as u16 {
