@@ -53,6 +53,13 @@ function onDataPortInput(e: Event) {
   connDataPort.value = (e.target as HTMLInputElement).value;
 }
 
+// V2 (2006): this is the master's OWN local listening port — the master is the
+// data-pipe server and binds it (mgmt+1 by default) for the substation to push
+// to. V3 (2011): it's the REMOTE substation data port the master dials out to.
+const dataPortLabel = computed(() =>
+  protocol.value === "V2" ? "本地侦听端口" : "数据端口"
+);
+
 // Editable runtime params.
 const rateHz = ref("100"); // PERIOD inverse → user-visible Hz
 const heartbeatSecs = ref("5");
@@ -214,13 +221,14 @@ watch(rateHz, debounced<string>(250, async (v) => {
 
 <template>
   <div class="config-panel">
-    <fieldset>
-      <legend>配置及运行信息</legend>
+    <section class="panel">
+      <div class="panel-hd">配置及运行信息</div>
+      <div class="panel-bd">
 
       <div class="row"><label>子站地址</label><input v-model="connIp" /></div>
       <div class="row"><label>命令端口</label><input v-model="connMgmtPort" inputmode="numeric" /></div>
-      <div class="row" v-if="protocol === 'V3'">
-        <label>数据端口</label><input :value="connDataPort" @input="onDataPortInput" inputmode="numeric" />
+      <div class="row">
+        <label>{{ dataPortLabel }}</label><input :value="connDataPort" @input="onDataPortInput" inputmode="numeric" />
       </div>
       <div class="row"><label>IDCODE</label><input :value="idcodeDisplay" readonly placeholder="待握手" /></div>
       <div class="row">
@@ -264,18 +272,21 @@ watch(rateHz, debounced<string>(250, async (v) => {
         <div class="rd-row"><label>最新时间</label><span class="rd-val mono">{{ latestTime }}</span></div>
         <div class="rd-row"><label>上传速率</label><span class="rd-val mono">{{ fps }} <span class="unit">帧/秒</span></span></div>
       </div>
-    </fieldset>
-
-    <fieldset class="log-fs">
-      <legend>事件日志</legend>
-      <div class="log-list">
-        <div v-for="(e, i) in events" :key="i" :class="['log-line', e.kind]">
-          <span class="log-time">{{ e.time }}</span>
-          <span class="log-msg">{{ e.message }}</span>
-        </div>
-        <div v-if="events.length === 0" class="log-empty">无事件</div>
       </div>
-    </fieldset>
+    </section>
+
+    <section class="panel log-fs">
+      <div class="panel-hd">事件日志</div>
+      <div class="panel-bd log-bd">
+        <div class="log-list">
+          <div v-for="(e, i) in events" :key="i" :class="['log-line', e.kind]">
+            <span class="log-time">{{ e.time }}</span>
+            <span class="log-msg">{{ e.message }}</span>
+          </div>
+          <div v-if="events.length === 0" class="log-empty">无事件</div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -290,18 +301,64 @@ watch(rateHz, debounced<string>(250, async (v) => {
   padding: 8px;
   overflow: hidden;
 }
-fieldset {
+/* Panel = framed group with a label-plate header band. Replaces the old
+   fieldset/legend (whose notched border + double top edge read as an
+   un-styled browser default). Frame is now continuous; the title lives in
+   its own tinted strip with a brand-blue nameplate tick on the left. */
+.panel {
   border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 10px 12px 12px;
   background: var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+  /* 机箱受光唇边 —— 顶部一道极细高光，下沉的实体感 */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
 }
-fieldset legend {
-  padding: 0 6px;
+/* 表头 = 拉丝金属铭牌：镜面渐变(中段高光带) + 顶部受光唇边 +
+   底部机加工接缝(暗线 + .panel-bd 顶部亮线 = 双线浮雕)，标题蚀刻。 */
+.panel-hd {
+  position: relative;
+  padding: 6px 10px 6px 14px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-dim);
-  letter-spacing: 0.5px;
+  letter-spacing: 1.5px;
+  color: #44443d;
+  /* 顶层极细竖向拉丝纹理(2px 周期，低对比) 叠在压暗半档的阳极氧化
+     深灰镜面渐变上 —— 两者不同轴，纹理不被宏观高光糊掉。 */
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.05) 0px,
+      rgba(255,255,255,0.05) 1px,
+      rgba(0,0,0,0.028) 1px,
+      rgba(0,0,0,0.028) 2px
+    ),
+    linear-gradient(
+      180deg,
+      #e4e3d9 0%,
+      #d4d3c8 44%,
+      #cbcabf 56%,
+      #bbbaae 100%
+    );
+  border-bottom: 1px solid var(--border);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.75),
+    inset 0 -1px 1px rgba(0,0,0,0.07);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.6);
+  user-select: none;
+}
+/* 品牌蓝竖纹 —— 嵌进金属面的铭牌指示纹，紧贴左边框 */
+.panel-hd::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #3a78bd, var(--accent) 50%, var(--accent-dark));
+  box-shadow: inset -1px 0 0 rgba(0,0,0,0.18), 1px 0 0 rgba(255,255,255,0.5);
+}
+.panel-bd {
+  padding: 10px 12px 12px;
+  /* 接缝下方的受光亮线，与表头底部暗线合成浮雕 */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
 }
 
 /* Form row — pixel-aligned label : control ---------------------------- */
@@ -330,6 +387,7 @@ fieldset legend {
   font-size: 13px;
   line-height: 22px;
   user-select: none;
+  white-space: nowrap;
 }
 /* Render the colon via ::after so spacing is consistent regardless of
    label length (CJK vs ASCII have different intrinsic widths). */
@@ -488,6 +546,15 @@ fieldset legend {
   display: flex;
   flex-direction: column;
   min-height: 120px;
+}
+/* header band is fixed-height; body flexes to fill the panel so the log
+   list can scroll within it */
+.log-bd {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .log-list {
   flex: 1;

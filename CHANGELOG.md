@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed 改进
+
+- `ConfigInfoPanel`: V2 (2006) 也显示数据端口字段并命名为「本地侦听端口」(默认 命令端口+1, 可编辑) —— V2 主站是数据通道的**服务端**, 在本地 `bind` 此端口等子站主动上送; V3 (2011) 仍显示「数据端口」(主站外连子站的远程数据口)。修正 0.3.x simpmufep UI 重做时把端口字段可见性反转、V2 本地侦听端口被一并隐藏的问题 / `ConfigInfoPanel`: V2 (2006) now also shows the data-port field, labeled "本地侦听端口" (defaults to command-port + 1, editable) — the V2 master is the data-pipe **server** and binds this local port for the substation to push to; V3 (2011) keeps "数据端口" (the remote substation port the master dials out to). Fixes the 0.3.x simpmufep redesign hiding the V2 local-listen port.
+
 ## [0.3.1] - 2026-05-29
 
 ### Highlights / 亮点
@@ -58,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Linux x64, Windows x64.
 - 端口配置重设计: V3 隐藏 data port (主站外联), V2 命名为「本地侦听端口」;
   station 面板 mgmt/data 端口分列 + 自动跟随 + dirty tracking.
+  (注: 此可见性规则在 0.3.x simpmufep UI 重做后一度反转为「V2 隐藏 / V3 显示数据端口」,
+  Unreleased 已把 V2 的本地侦听端口重新暴露 —— 见顶部 Unreleased 段。)
 - headless_smoke example 驱动 MasterStation 全链路 PMU 集成测试.
 
 ### Fixed
