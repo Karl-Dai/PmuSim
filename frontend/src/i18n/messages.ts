@@ -3,7 +3,7 @@ import type { Locale } from './detect'
 export const messages: Record<Locale, Record<string, string>> = {
   zh: {
     // App / title bar
-    'app.title': 'simpmufep — PMU 主站模拟器',
+    'app.title': 'PmuSim — PMU 主站模拟器',
     'app.github': '在 GitHub 上查看',
     'app.checkUpdate': '检查更新',
     'app.checking': '检查中…',
@@ -95,7 +95,7 @@ export const messages: Record<Locale, Record<string, string>> = {
   },
   en: {
     // App / title bar
-    'app.title': 'simpmufep — PMU Master Station Simulator',
+    'app.title': 'PmuSim — PMU Master Station Simulator',
     'app.github': 'View on GitHub',
     'app.checkUpdate': 'Check for Updates',
     'app.checking': 'Checking…',
