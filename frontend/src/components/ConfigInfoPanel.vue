@@ -167,14 +167,10 @@ async function pauseData() {
   }
 }
 
-async function triggerCmd() {
-  if (!session.value) return;
-  try {
-    await invoke("send_command", { idcode: session.value.idcode, cmd: "trigger", period: null });
-  } catch (e) {
-    pushToast(`触发失败: ${toastError(e)}`, "error");
-  }
-}
+// 触发 (CMD=0xA000 "联网触发") 已从 UI 移除 — 规约 §8 表 3 只给了命令
+// 编码,没说子站收到后做什么,实测子站也不会返回任何明确状态(STAT
+// bit11/bit3-0 应该翻转但 lab 子站不响应)。后端 send_command 的
+// "trigger" 分支保留以备调试 / 未来重新启用。
 
 // Heartbeat live update.
 watch(heartbeatSecs, debounced<string>(250, async (v) => {
@@ -253,8 +249,7 @@ watch(rateHz, debounced<string>(250, async (v) => {
       <div class="btn-grid">
         <button class="btn" @click="startEverything" :disabled="busy || running"><span>开始</span></button>
         <button class="btn" @click="stopEverything" :disabled="busy || !running"><span>停止</span></button>
-        <button class="btn" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>暂停</span></button>
-        <button class="btn" @click="triggerCmd" :disabled="!session"><span>触发</span></button>
+        <button class="btn btn-wide" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>暂停</span></button>
       </div>
 
       <div class="readout">
@@ -403,6 +398,8 @@ fieldset legend {
   gap: 8px;
   margin-top: 14px;
 }
+/* 暂停按钮独占第二行,平衡 3 按钮布局(原 2x2 删去触发后) */
+.btn-wide { grid-column: 1 / -1; }
 .btn {
   height: 30px;
   border: 1px solid #7a7a72;
