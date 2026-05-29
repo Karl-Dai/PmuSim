@@ -2,7 +2,9 @@
 import { computed, ref } from "vue";
 import { useSessions } from "../composables/useSessions";
 import { useCommLog } from "../composables/useCommLog";
+import { useI18n } from "../i18n";
 
+const { t } = useI18n();
 const { selectedIdcode, configs } = useSessions();
 const { latestData } = useCommLog();
 // Stable key (e.g. "stat-0" / "an-3" / "dg-7") so reselection survives
@@ -10,18 +12,6 @@ const { latestData } = useCommLog();
 const selectedKey = ref<string | null>(null);
 
 const cfg = computed(() => configs.get(selectedIdcode.value));
-
-const TRIGGER_REASONS: Record<number, string> = {
-  0: "手动",
-  1: "幅值越下限",
-  2: "幅值越上限",
-  3: "相角差",
-  4: "频率越限",
-  5: "频率变化率越限",
-  6: "线性组合",
-  7: "开关量",
-  8: "低频振荡",
-};
 
 interface DisplayRow {
   key: string;
@@ -45,17 +35,17 @@ const displayRows = computed<DisplayRow[]>(() => {
   const stat = data?.stat;
   const has = stat !== undefined;
   const ok = (good: boolean): DisplayRow["tone"] => !has ? undefined : good ? "ok" : "err";
-  rows.push({ key: "stat-0", num: "01", name: "数据可用",
-    value: !has ? "-" : (stat & 0x8000) === 0 ? "正常" : "异常", extra: "",
+  rows.push({ key: "stat-0", num: "01", name: t("stat.dataValid"),
+    value: !has ? "-" : (stat & 0x8000) === 0 ? t("stat.normal") : t("stat.abnormal"), extra: "",
     tone: ok((stat! & 0x8000) === 0) });
-  rows.push({ key: "stat-1", num: "02", name: "装置状态",
-    value: !has ? "-" : (stat & 0x4000) === 0 ? "正常" : "异常", extra: "",
+  rows.push({ key: "stat-1", num: "02", name: t("stat.deviceStatus"),
+    value: !has ? "-" : (stat & 0x4000) === 0 ? t("stat.normal") : t("stat.abnormal"), extra: "",
     tone: ok((stat! & 0x4000) === 0) });
-  rows.push({ key: "stat-2", num: "03", name: "同步状态",
-    value: !has ? "-" : (stat & 0x2000) === 0 ? "同步" : "失步", extra: "",
+  rows.push({ key: "stat-2", num: "03", name: t("stat.syncStatus"),
+    value: !has ? "-" : (stat & 0x2000) === 0 ? t("stat.synced") : t("stat.desynced"), extra: "",
     tone: ok((stat! & 0x2000) === 0) });
-  rows.push({ key: "stat-3", num: "04", name: "触发原因",
-    value: !has ? "-" : (stat & 0x0800) === 0 ? "无" : (TRIGGER_REASONS[stat & 0xF] ?? "未知"),
+  rows.push({ key: "stat-3", num: "04", name: t("stat.triggerReason"),
+    value: !has ? "-" : (stat & 0x0800) === 0 ? t("stat.none") : ((stat & 0xF) <= 8 ? t(`trigger.${stat & 0xF}`) : t("stat.unknown")),
     extra: "",
     tone: !has || (stat! & 0x0800) === 0 ? undefined : "warn" });
 
@@ -92,7 +82,7 @@ const displayRows = computed<DisplayRow[]>(() => {
   const digitalTotal = c.dgnmr * 16;
   for (let i = 0; i < digitalTotal; i++) {
     const word = data?.digital[Math.floor(i / 16)];
-    const value = word === undefined ? "-" : ((word >> (i % 16)) & 1 ? "合位" : "分位");
+    const value = word === undefined ? "-" : ((word >> (i % 16)) & 1 ? t("data.digitalOn") : t("data.digitalOff"));
     rows.push({
       key: `dg-${i}`,
       num: String(5 + c.annmr + i).padStart(2, "0"),
@@ -111,10 +101,10 @@ const displayRows = computed<DisplayRow[]>(() => {
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width: 50px">序号</th>
-          <th>名称</th>
-          <th style="width: 120px">状态/数值</th>
-          <th style="width: 160px">比例系数/开关量状态</th>
+          <th style="width: 50px">{{ t("data.colNo") }}</th>
+          <th>{{ t("data.colName") }}</th>
+          <th style="width: 120px">{{ t("data.colValue") }}</th>
+          <th style="width: 160px">{{ t("data.colScale") }}</th>
         </tr>
       </thead>
       <tbody>
@@ -127,7 +117,7 @@ const displayRows = computed<DisplayRow[]>(() => {
           <td>{{ row.extra }}</td>
         </tr>
         <tr v-if="!cfg" class="empty-row">
-          <td colspan="4">点击「连接」后,CFG-2 到达再显示通道列表</td>
+          <td colspan="4">{{ t("data.empty") }}</td>
         </tr>
       </tbody>
     </table>
