@@ -9,7 +9,7 @@
 
 ## P0 — 接入新子站立即触发
 
-### [ ] 1. FORMAT 标志位被忽略 → 浮点 / 直角坐标子站静默错码
+### [x] 1. FORMAT 标志位被忽略 → 浮点 / 直角坐标子站静默错码
 - **位置:** `crates/pmusim-core/src/protocol/parser.rs:234` (`parse_data`)
 - **现状:** PHASORS / ANALOG / FREQ / DFREQ 永远按 `i16` 读取,不看 CFG 中 FORMAT bit 0-3。
 - **规约:** §8.5 表 8 FORMAT
@@ -20,13 +20,13 @@
 - **触发场景:** 子站 FORMAT=0x001E(全 float)时,模拟量 4 字节按 2×i16 读,数量翻倍 + 数值完全错乱。当前 lab IEMP 子站 FORMAT=0x10 全 int16 + 极坐标(bit0=1)恰好命中默认路径所以未暴露。
 - **修复:** `parse_data` 接收 `format_flags`,按位分支。需要相应改 `build_data` 与所有调用点。
 
-### [ ] 2. Multi-PMU 配置帧仅解第一台
+### [x] 2. Multi-PMU 配置帧仅解第一台
 - **位置:** `crates/pmusim-core/src/protocol/parser.rs:121` (`parse_config` 注释 "first PMU only for now")
 - **规约:** §8.2 表 5 NUM_PMU 允许 > 1
 - **触发:** NUM_PMU > 1 时,第一台 PMU 解完后偏移指向第二台 STN,被当成 PHUNIT 读 → 字段全乱。
 - **修复:** 循环 NUM_PMU 次,改 `ConfigFrame` 为 `Vec<PmuBlock>`。改造面大,但接 ≥2 台子站必须。
 
-### [ ] 3. CFG-2 ACK / NACK 不等待 + 不响应
+### [x] 3. CFG-2 ACK / NACK 不等待 + 不响应
 - **位置:**
   - `crates/pmusim-app/src/network/master.rs:966` — "ACK / NACK are informational - no state change needed"
   - `crates/pmusim-app/src/network/master.rs:1224` — `do_auto_handshake` 用固定 `sleep(500ms)` 替代等 ACK
