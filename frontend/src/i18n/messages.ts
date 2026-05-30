@@ -38,6 +38,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.rateApplied': '已下发新速率 {hz}Hz',
     'config.rateFailed': '修改速率失败: {error}',
     // Session state
+    'state.connecting': '连接中',
     'state.connected': '已连接',
     'state.cfg1_received': '已收 CFG-1',
     'state.cfg2_sent': '已下传 CFG-2',
@@ -130,6 +131,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.rateApplied': 'New rate applied: {hz} Hz',
     'config.rateFailed': 'Failed to change rate: {error}',
     // Session state
+    'state.connecting': 'Connecting',
     'state.connected': 'Connected',
     'state.cfg1_received': 'CFG-1 received',
     'state.cfg2_sent': 'CFG-2 sent',

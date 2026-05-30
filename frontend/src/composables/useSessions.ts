@@ -7,7 +7,14 @@ const selectedIdcode = ref<string>("");
 
 export function useSessions() {
   function addSession(idcode: string, peerIp: string) {
-    sessions.set(idcode, { idcode, peerIp, state: "connected" });
+    // A placeholder session keyed by "host:port" only means a TCP connect
+    // attempt is in flight / the PMU handshake hasn't started — it must NOT
+    // read as 已连接 (otherwise a peer that accepts TCP but never replies with
+    // CFG-1 shows green "已连接" forever, see do_connect's "connecting…" emit).
+    // Only a re-keyed session (real IDCODE, no ":") — which exists *because*
+    // the substation actually replied with a frame — is a real connection.
+    const state: SessionInfo["state"] = idcode.includes(":") ? "connecting" : "connected";
+    sessions.set(idcode, { idcode, peerIp, state });
     // Auto-select the first/newest session so the user doesn't have to
     // remember to click the row before using the 操作 buttons. Re-key
     // (placeholder → real IDCODE) takes the removeSession path which

@@ -81,6 +81,7 @@ const stateClass = computed(() => {
   const s = session.value?.state;
   if (!s) return "";
   if (s === "disconnected") return "st-err";
+  if (s === "connecting") return "st-warn";
   return "st-ok";
 });
 
@@ -527,6 +528,7 @@ watch(rateHz, debounced<string>(250, async (v) => {
 }
 /* 状态读数语义色：在线绿 / 断开红 */
 .rd-val.st-ok { color: var(--ok); font-weight: 600; }
+.rd-val.st-warn { color: var(--warn); font-weight: 600; }
 .rd-val.st-err { color: var(--err); font-weight: 600; }
 .rd-val .unit {
   color: var(--text-faint);
