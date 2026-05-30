@@ -114,7 +114,7 @@ impl SubStation {
                         }
                         Err(e) => {
                             warn!("数据监听 accept 出错: {e}");
-                            let _ = evt; // 仅日志
+                            emit_event(&evt, SubEvent::Error { error: format!("数据监听 accept 出错: {e}") });
                             break;
                         }
                     }
@@ -129,6 +129,8 @@ impl SubStation {
         let evt = self.event_tx.clone();
         let dw = self.data_writer.clone();
         let stream_task = self.stream_task.clone();
+        // 单子站设计:mgmt_loop 在 accept 循环内直接 await(非 spawn),
+        // 同一时刻只服务一个主站连接;当前主站断开后才接受下一个。
         self.tasks.push(tokio::spawn(async move {
             loop {
                 let Ok((stream, addr)) = mgmt_listener.accept().await else { break; };
@@ -303,6 +305,11 @@ impl SubStation {
             let mut ticker = tokio::time::interval(std::time::Duration::from_millis(period_ms.max(1)));
             loop {
                 ticker.tick().await;
+                // 写端未就绪(数据管道尚未连入/已断)→ 跳过本拍,不消费 trigger/frame_index,
+                // 避免在连接窗口内丢掉一次触发。快速取放锁,不跨 settings/gen 读持有。
+                if dw.lock().await.is_none() {
+                    continue;
+                }
                 let cfg = { settings.read().await.config.clone() };
                 let g = { *gen.read().await };
                 let trig = trigger.swap(false, Ordering::Relaxed);
@@ -312,10 +319,13 @@ impl SubStation {
                     Err(e) => { error!("build_data 失败: {e}"); continue; }
                 };
                 let mut guard = dw.lock().await;
-                // V3 主站可能在 OpenData 之后才完成数据口连接，写半此刻可能尚未
-                // 就绪；此时不退出，等下一拍重试（不消费 frame_index/trigger）。
+                // 取到写帧锁后再次确认(上一步释放后可能断开);此处丢帧已消费 trigger,属罕见断开竞态。
                 let Some(w) = guard.as_mut() else { continue; };
-                if w.write_all(&bytes).await.is_err() { break; }
+                if let Err(e) = w.write_all(&bytes).await {
+                    emit_event(&evt, SubEvent::Error { error: format!("数据发送失败,推流停止: {e}") });
+                    emit_event(&evt, SubEvent::StreamingStopped);
+                    break;
+                }
                 let _ = w.flush().await;
                 drop(guard);
                 emit_event(&evt, SubEvent::DataFrameSent { data: data_frame_to_info(&df) });
