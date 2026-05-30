@@ -104,3 +104,47 @@ async fn v3_master_drives_substation_to_streaming() {
     master.stop().await;
     sub.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_master_drives_substation_to_streaming() {
+    // 主站 V2：先 start() 取得它绑定的数据监听口
+    let (m_tx, mut m_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(m_tx, 0, 30.0, ProtocolVersion::V2);
+    master.start().await.unwrap();
+    let master_data_port = master.data_port; // V2 下非 0
+
+    // 子站 V2：mgmt 自分配；data_port 指向主站数据口(用于连出)
+    let (sub_tx, _sub_rx) = mpsc::unbounded_channel::<SubEvent>();
+    let mut settings = SubSettings {
+        version: ProtocolVersion::V2,
+        mgmt_port: 0,
+        data_port: master_data_port,
+        config: sub_config(ProtocolVersion::V2),
+        gen: DataGen { freq_offset_hz: 0.05, rocof_hz_s: 0.0 },
+    };
+    settings.config.version = ProtocolVersion::V2;
+    let mut sub = SubStation::new(sub_tx, settings);
+    sub.start().await.unwrap();
+    let mgmt_port = sub.mgmt_port();
+
+    master
+        .connect_to_substation("127.0.0.1".into(), mgmt_port, 0, ProtocolVersion::V2)
+        .await
+        .unwrap();
+    let tmp = match wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::SessionCreated { .. })).await {
+        PmuEvent::SessionCreated { idcode, .. } => idcode,
+        _ => unreachable!(),
+    };
+    master.auto_handshake(tmp, Some(100)).await.unwrap();
+
+    let _ = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::Cfg1Received { .. })).await;
+    let _ = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::StreamingStarted { .. })).await;
+    let data = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::DataFrame { .. })).await;
+    if let PmuEvent::DataFrame { data, .. } = data {
+        assert_eq!(data.analog.len(), 2);
+        assert_eq!(data.digital, vec![0x000A]);
+    }
+
+    master.stop().await;
+    sub.stop().await;
+}
