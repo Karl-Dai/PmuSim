@@ -29,6 +29,7 @@ pub struct PhasorGen {
 pub struct SubConfig {
     pub version: ProtocolVersion,
     pub idcode: String,
+    /// 站名（GBK）。由 network 层的 CFG 构建器写入 CFG-1/CFG-2，本模块不直接使用。
     pub stn: String,
     /// 帧率（帧/秒），由 CFG-2 period/fnom 推得（见 network 层）。
     pub data_rate_fps: u32,
@@ -170,8 +171,24 @@ mod tests {
                 assert_eq!(d.analog.len(), 2);
                 assert_eq!(d.digital, vec![0x000A]);
                 assert_eq!(d.phasors.len(), 1);
+                assert_eq!(d.freq, 100.0, "Δf=0.1Hz 应编码为 100 mHz");
+                assert!((d.phasors[0].0 - 999.3).abs() < 1.5, "real={}", d.phasors[0].0);
+                assert!((d.phasors[0].1 - 37.7).abs() < 1.5, "imag={}", d.phasors[0].1);
             }
             _ => panic!("expected Data frame"),
+        }
+    }
+
+    #[test]
+    fn nonzero_phase_offset() {
+        // phase_deg=90, Δf=0 → real≈0, imag≈+mag,与帧序号无关
+        let g = DataGen { freq_offset_hz: 0.0, rocof_hz_s: 0.0 };
+        let mut c = cfg();
+        c.phasors = vec![PhasorGen { magnitude: 1000.0, phase_deg: 90.0 }];
+        for &idx in &[0u64, 7, 123] {
+            let f = next_data_frame(&c, &g, 0, idx, false);
+            assert!(f.phasors[0].0.abs() < 1.0, "real={}", f.phasors[0].0);
+            assert!((f.phasors[0].1 - 1000.0).abs() < 1.0, "imag={}", f.phasors[0].1);
         }
     }
 
