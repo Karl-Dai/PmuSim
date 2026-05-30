@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/pmusim-core", "crates/pmusim-app"]
+members = ["crates/pmusim-core", "crates/pmusim-app", "crates/pmusim-sub"]
 resolver = "2"
