@@ -30,22 +30,28 @@ fn sub_config(version: ProtocolVersion) -> SubConfig {
     }
 }
 
-/// 在相邻端口 (p, p+1) 上启动一个子站，返回 (子站, mgmt_port)。
+/// 启动一个子站；端口 0 → OS 分配 mgmt,V3 数据口取 mgmt+1。mgmt+1 可能被
+/// 其他并行测试占用导致 start() 绑定失败 —— 换一个 mgmt 端口重试,直到拿到
+/// 一对空闲端口(与 pmusim-app/tests/e2e.rs 的端口重试同构,保证并行不撞)。
 async fn spawn_substation(
     version: ProtocolVersion,
 ) -> (SubStation, mpsc::UnboundedReceiver<SubEvent>, u16) {
-    let (tx, rx) = mpsc::unbounded_channel::<SubEvent>();
-    let settings = SubSettings {
-        version,
-        mgmt_port: 0,
-        data_port: 0,
-        config: sub_config(version),
-        gen: DataGen { freq_offset_hz: 0.1, rocof_hz_s: 0.0 },
-    };
-    let mut sub = SubStation::new(tx, settings);
-    sub.start().await.expect("substation start");
-    let port = sub.mgmt_port();
-    (sub, rx, port)
+    for _ in 0..20 {
+        let (tx, rx) = mpsc::unbounded_channel::<SubEvent>();
+        let settings = SubSettings {
+            version,
+            mgmt_port: 0,
+            data_port: 0,
+            config: sub_config(version),
+            gen: DataGen { freq_offset_hz: 0.1, rocof_hz_s: 0.0 },
+        };
+        let mut sub = SubStation::new(tx, settings);
+        if sub.start().await.is_ok() {
+            let port = sub.mgmt_port();
+            return (sub, rx, port);
+        }
+    }
+    panic!("substation start: 20 次端口绑定均失败");
 }
 
 async fn wait_master_event<F: FnMut(&PmuEvent) -> bool>(
@@ -115,14 +121,13 @@ async fn v2_master_drives_substation_to_streaming() {
 
     // 子站 V2：mgmt 自分配；data_port 指向主站数据口(用于连出)
     let (sub_tx, _sub_rx) = mpsc::unbounded_channel::<SubEvent>();
-    let mut settings = SubSettings {
+    let settings = SubSettings {
         version: ProtocolVersion::V2,
         mgmt_port: 0,
         data_port: master_data_port,
         config: sub_config(ProtocolVersion::V2),
         gen: DataGen { freq_offset_hz: 0.05, rocof_hz_s: 0.0 },
     };
-    settings.config.version = ProtocolVersion::V2;
     let mut sub = SubStation::new(sub_tx, settings);
     sub.start().await.unwrap();
     let mgmt_port = sub.mgmt_port();
@@ -137,7 +142,13 @@ async fn v2_master_drives_substation_to_streaming() {
     };
     master.auto_handshake(tmp, Some(100)).await.unwrap();
 
-    let _ = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::Cfg1Received { .. })).await;
+    let cfg1 = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::Cfg1Received { .. })).await;
+    if let PmuEvent::Cfg1Received { idcode, cfg } = cfg1 {
+        assert_eq!(idcode, IDCODE);
+        assert_eq!(cfg.stn, STN);
+        assert_eq!(cfg.annmr, 2);
+        assert_eq!(cfg.dgnmr, 1);
+    }
     let _ = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::StreamingStarted { .. })).await;
     let data = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::DataFrame { .. })).await;
     if let PmuEvent::DataFrame { data, .. } = data {
