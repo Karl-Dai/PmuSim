@@ -63,6 +63,24 @@ pub fn fracsec_time_quality(fracsec: u32) -> (u8, &'static str) {
     (bits, label)
 }
 
+/// Encode a sub-second fraction (`0.0..1.0`) into a FRACSEC word — the
+/// inverse of [`fracsec_to_ms`]. `count = round(fraction * meas_rate)`.
+/// For V3 (`version >= 3`) the low 24 bits hold the count and bits 27-24
+/// carry the time-quality nibble (§8.11 表 4, 0 = clock locked); V2 has
+/// no quality bits so `time_quality` is ignored. Returns 0 when
+/// `meas_rate == 0` (mirrors `fracsec_to_ms`'s guard).
+pub fn fracsec_from_fraction(fraction: f64, meas_rate: u32, version: u8, time_quality: u8) -> u32 {
+    if meas_rate == 0 {
+        return 0;
+    }
+    let count = (fraction.clamp(0.0, 1.0) * meas_rate as f64).round() as u32;
+    if version >= 3 {
+        (count & 0x00FF_FFFF) | (((time_quality & 0x0F) as u32) << 24)
+    } else {
+        count
+    }
+}
+
 pub fn current_soc() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -112,5 +130,29 @@ mod tests {
     fn fracsec_zero_meas_rate() {
         let ms = fracsec_to_ms(1000, 0, 3);
         assert!((ms - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn fracsec_from_fraction_roundtrips_v2() {
+        // 0.89s @ TIME_BASE=1_000_000 → count 890000；再过 fracsec_to_ms 还原
+        let f = fracsec_from_fraction(0.89, 1_000_000, 2, 0);
+        assert_eq!(f, 890_000);
+        let ms = fracsec_to_ms(f, 1_000_000, 2);
+        assert!((ms - 890.0).abs() < 0.1, "got {ms}");
+    }
+
+    #[test]
+    fn fracsec_from_fraction_v3_packs_quality() {
+        // V3：低 24 位是计数，bit27-24 是时间质量
+        let f = fracsec_from_fraction(0.5, 1_000_000, 3, 0b1001);
+        assert_eq!(f & 0x00FF_FFFF, 500_000);
+        assert_eq!((f >> 24) & 0x0F, 0b1001);
+        let ms = fracsec_to_ms(f, 1_000_000, 3);
+        assert!((ms - 500.0).abs() < 0.1, "got {ms}");
+    }
+
+    #[test]
+    fn fracsec_from_fraction_zero_rate() {
+        assert_eq!(fracsec_from_fraction(0.5, 0, 3, 0), 0);
     }
 }
