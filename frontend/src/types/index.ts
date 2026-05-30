@@ -1,7 +1,7 @@
 export interface SessionInfo {
   idcode: string;
   peerIp: string;
-  state: "connected" | "cfg1_received" | "cfg2_sent" | "streaming" | "disconnected";
+  state: "connecting" | "connected" | "cfg1_received" | "cfg2_sent" | "streaming" | "disconnected";
 }
 
 export interface ConfigInfo {
