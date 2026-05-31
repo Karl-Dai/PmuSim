@@ -180,8 +180,10 @@ cargo tauri build
 PmuSim/
 ├── crates/
 │   ├── pmusim-core/      # Protocol library (no Tauri dependency)
-│   └── pmusim-app/       # Tauri desktop application
-├── frontend/             # Vue 3 + TypeScript SPA
+│   ├── pmusim-app/       # Tauri desktop application (master station)
+│   └── pmusim-sub/       # Tauri desktop application (substation simulator)
+├── frontend/             # Vue 3 + TypeScript SPA (master)
+├── frontend-sub/         # Vue 3 + TypeScript SPA (substation)
 ├── scripts/              # Release scripts (updater manifest, release notes)
 └── .github/workflows/    # CI: release.yml (sign + publish)
 ```
@@ -191,6 +193,33 @@ PmuSim/
 | Backend  | Rust, [tokio](https://tokio.rs/) (async TCP), `encoding_rs` (GBK)  |
 | Frontend | Vue 3, TypeScript, Vite                                   |
 | Desktop  | [Tauri 2](https://tauri.app/) + `tauri-plugin-updater`    |
+
+## Substation simulator (`pmusim-sub`)
+
+`pmusim-sub` is a standalone Tauri app that plays the PMU **data-sender** role — the counterpart to the PmuSim master. Use it to develop or test the master without needing a real substation.
+
+**Protocol support** — V2 (Q/GDW 131-2006) and V3 (GB/T 26865.2-2011), with full command-response handshake: responds to CFG-1 / CFG-2 requests, accepts the Send-CFG-2 command, obeys Open/Close Data, heartbeat, and trigger frames.
+
+**Data generation** — configurable sine-phasor output per channel: magnitude, phase angle, system frequency offset Δf, and ROCOF. Static analog and digital values are also settable.
+
+**TCP roles (mirror of the master)**
+
+| Pipe       | Substation TCP Role (V2) | Substation TCP Role (V3) | Default Port |
+|------------|--------------------------|--------------------------|--------------|
+| Management | Server                   | Server                   | V2 7000 / V3 8000 |
+| Data       | Client (dials master)    | Server (master dials in) | V2 7001 / V3 8001 |
+
+**Run from source** (no signed installer / auto-updater in this version):
+
+```bash
+cd frontend-sub && npm install   # one-time frontend deps
+cd ../crates/pmusim-sub && cargo tauri dev
+```
+
+**Local interop test** — start `pmusim-sub` first, then launch the PmuSim master and point it at the substation:
+
+- **V3**: master mgmt target → `127.0.0.1 : 8000`
+- **V2**: master mgmt target → `127.0.0.1 : 7000`; master data-listen port → `7001`
 
 ## Changelog
 

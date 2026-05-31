@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- 新增 PMU 子站(数据发送方)模拟器 `pmusim-sub`：独立 Tauri App，支持 V2/V3 双协议、命令响应全握手、可配置正弦相量数据生成(Δf/ROCOF)，与主站对标可本地互测。
+
 ## [0.4.0] - 2026-05-29
 
 ### Highlights / 亮点
