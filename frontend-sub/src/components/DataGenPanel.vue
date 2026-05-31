@@ -2,6 +2,7 @@
 import { reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { running } from "../composables/useSubEvents";
+import { t } from "../i18n";
 
 const gen = reactive({ freq_offset_hz: 0.0, rocof_hz_s: 0.0 });
 
@@ -18,16 +19,16 @@ async function trigger() { if (running.value) await invoke("fire_trigger"); }
 
 <template>
   <section class="panel">
-    <h3>数据生成</h3>
-    <label>频率偏差 Δf (Hz)
+    <h3>{{ t("datagen.title") }}</h3>
+    <label>{{ t("datagen.freqOffset") }}
       <input type="range" min="-2" max="2" step="0.01" v-model.number="gen.freq_offset_hz" />
       <span>{{ gen.freq_offset_hz.toFixed(2) }}</span>
     </label>
-    <label>ROCOF (Hz/s)
+    <label>{{ t("datagen.rocof") }}
       <input type="range" min="-5" max="5" step="0.1" v-model.number="gen.rocof_hz_s" />
       <span>{{ gen.rocof_hz_s.toFixed(1) }}</span>
     </label>
-    <button :disabled="!running" @click="trigger">触发一帧</button>
+    <button :disabled="!running" @click="trigger">{{ t("datagen.trigger") }}</button>
   </section>
 </template>
 

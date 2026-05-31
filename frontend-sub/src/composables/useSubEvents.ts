@@ -4,6 +4,7 @@ import type { SubEvent, SubDataInfo } from "../types";
 import { useToast } from "./useToast";
 import { useEventLog } from "./useEventLog";
 import { useFrameRate } from "./useFrameRate";
+import { t } from "../i18n";
 
 const POLL_INTERVAL_MS = 100;
 
@@ -28,19 +29,19 @@ export function useSubEvents() {
     switch (ev.type) {
       case "Listening":
         listenPorts.value = { mgmt: ev.mgmt_port, data: ev.data_port };
-        pushEvent(`监听中 mgmt=${ev.mgmt_port} data=${ev.data_port}`);
+        pushEvent(t("event.listening", { mgmt: ev.mgmt_port, data: ev.data_port }));
         break;
       case "MasterConnected":
-        masterPeer.value = ev.peer_ip; pushEvent(`主站已连接 ${ev.peer_ip}`); break;
+        masterPeer.value = ev.peer_ip; pushEvent(t("event.masterConnected", { peer: ev.peer_ip })); break;
       case "MasterDisconnected":
-        masterPeer.value = null; streaming.value = false; resetRate(); pushEvent(`主站断开 ${ev.peer_ip}`); break;
+        masterPeer.value = null; streaming.value = false; resetRate(); pushEvent(t("event.masterDisconnected", { peer: ev.peer_ip })); break;
       case "CommandReceived":
-        pushEvent(`收到命令 ${ev.name}(0x${ev.cmd.toString(16)})`); break;
-      case "Cfg1Sent": pushEvent("已上传 CFG-1"); break;
-      case "Cfg2Sent": pushEvent("已上传 CFG-2"); break;
-      case "Cfg2Received": pushEvent("收到主站下传 CFG-2"); break;
-      case "StreamingStarted": streaming.value = true; pushEvent("开始推流"); break;
-      case "StreamingStopped": streaming.value = false; resetRate(); pushEvent("停止推流"); break;
+        pushEvent(t("event.commandReceived", { name: ev.name, cmd: ev.cmd.toString(16) })); break;
+      case "Cfg1Sent": pushEvent(t("event.cfg1Sent")); break;
+      case "Cfg2Sent": pushEvent(t("event.cfg2Sent")); break;
+      case "Cfg2Received": pushEvent(t("event.cfg2Received")); break;
+      case "StreamingStarted": streaming.value = true; pushEvent(t("event.streamingStarted")); break;
+      case "StreamingStopped": streaming.value = false; resetRate(); pushEvent(t("event.streamingStopped")); break;
       case "DataFrameSent": lastData.value = ev.data; sentCount.value++; tickRate(); break;
       case "RawFrame": break;
       case "Error": pushToast(ev.error); pushEvent(ev.error, "error"); break;

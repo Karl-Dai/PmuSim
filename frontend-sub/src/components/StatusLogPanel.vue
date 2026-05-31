@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { masterPeer, streaming, sentCount } from "../composables/useSubEvents";
 import { useEventLog } from "../composables/useEventLog";
+import { t } from "../i18n";
 
 const { events } = useEventLog();
 </script>
 
 <template>
   <section class="panel">
-    <h3>状态</h3>
-    <p>主站: {{ masterPeer ?? "未连接" }}</p>
-    <p>推流: {{ streaming ? "进行中" : "停止" }} · 已发 {{ sentCount }} 帧</p>
-    <h4>事件日志</h4>
+    <h3>{{ t("status.title") }}</h3>
+    <p>{{ t("status.master", { peer: masterPeer ?? t("status.notConnected") }) }}</p>
+    <p>{{ t("status.streaming", { state: streaming ? t("status.streamingOn") : t("status.streamingOff"), count: sentCount }) }}</p>
+    <h4>{{ t("status.eventLog") }}</h4>
     <ul class="log">
       <li v-for="(e, i) in events" :key="i" :class="{ error: e.kind === 'error' }">
         {{ e.time }} {{ e.message }}
