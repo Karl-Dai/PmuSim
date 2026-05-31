@@ -180,8 +180,10 @@ cargo tauri build
 PmuSim/
 ├── crates/
 │   ├── pmusim-core/      # 协议库 (无 Tauri 依赖)
-│   └── pmusim-app/       # Tauri 桌面应用
-├── frontend/             # Vue 3 + TypeScript SPA
+│   ├── pmusim-app/       # Tauri 桌面应用 (主站)
+│   └── pmusim-sub/       # Tauri 桌面应用 (子站模拟器)
+├── frontend/             # Vue 3 + TypeScript SPA (主站)
+├── frontend-sub/         # Vue 3 + TypeScript SPA (子站)
 ├── scripts/              # release 脚本 (updater manifest、release notes)
 └── .github/workflows/    # CI: release.yml (签名 + 发布)
 ```
@@ -191,6 +193,33 @@ PmuSim/
 | 后端     | Rust, [tokio](https://tokio.rs/) (async TCP), `encoding_rs` (GBK) |
 | 前端     | Vue 3, TypeScript, Vite                                       |
 | 桌面层   | [Tauri 2](https://tauri.app/) + `tauri-plugin-updater`        |
+
+## 子站模拟器 (`pmusim-sub`)
+
+`pmusim-sub` 是一个独立的 Tauri 应用, 扮演 PMU **数据发送方**的角色 — 与主站 PmuSim 对标。可用来在没有真实子站的情况下开发和测试主站。
+
+**规约支持** — 同时支持 V2 (Q/GDW 131-2006) 与 V3 (GB/T 26865.2-2011), 完整命令响应握手: 响应 CFG-1 / CFG-2 请求, 接收「下传 CFG-2」命令, 执行打开/关闭数据、心跳、触发帧。
+
+**数据生成** — 各通道可独立配置正弦相量输出: 幅值、初相角、系统频率偏移 Δf 及 ROCOF。模拟量和开关量也可设置静态值。
+
+**TCP 角色 (与主站镜像)**
+
+| 通道   | 子站 TCP 角色 (V2)        | 子站 TCP 角色 (V3)        | 默认端口            |
+|--------|---------------------------|---------------------------|---------------------|
+| 管理   | server                    | server                    | V2 7000 / V3 8000   |
+| 数据   | client (主动连主站)       | server (主站连入)         | V2 7001 / V3 8001   |
+
+**从源码运行** (本版本暂无签名安装包 / 自动更新):
+
+```bash
+cd frontend-sub && npm install   # 一次性安装前端依赖
+cd ../crates/pmusim-sub && cargo tauri dev
+```
+
+**本地互测** — 先启动 `pmusim-sub`, 再启动主站 PmuSim, 将主站目标地址指向子站:
+
+- **V3**: 主站管理目标 → `127.0.0.1 : 8000`
+- **V2**: 主站管理目标 → `127.0.0.1 : 7000`; 主站数据本地侦听端口 → `7001`
 
 ## 更新日志
 
