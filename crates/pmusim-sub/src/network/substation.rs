@@ -279,7 +279,9 @@ impl SubStation {
             (s.version, (1000.0 / fps as f64) as u64, current_soc())
         };
 
-        // V2：数据管道子站作客户端，连主站数据口（本地互测用 127.0.0.1）。
+        // V2：数据管道子站作客户端，连主站数据口。
+        // 限制：目标 IP 硬编码为 127.0.0.1，仅支持本地互测。
+        // 若需连接远端主站，需在 mgmt accept 时捕获对端 IP 并传入此处。
         if version == ProtocolVersion::V2 {
             let port = { settings.read().await.data_port };
             let target = ("127.0.0.1", if port == 0 { 7001 } else { port });
