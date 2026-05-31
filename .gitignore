@@ -37,10 +37,13 @@ target/
 
 # Tauri (generated)
 crates/pmusim-app/gen/
+crates/pmusim-sub/gen/
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend-sub/dist
+frontend-sub/node_modules
 
 # Tooling
 .playwright-mcp/
