@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, computed } from "vue";
+import { reactive, computed, ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { load } from "@tauri-apps/plugin-store";
 import type { ConfigInput } from "../types";
 import { running, listenPorts } from "../composables/useSubEvents";
 import { t } from "../i18n";
@@ -29,6 +30,40 @@ async function start() {
 }
 async function stop() { await invoke("stop_substation"); running.value = false; }
 async function apply() { await invoke("update_config", { config: { ...form } }); }
+
+// --- Presets ---
+const PRESET_STORE = "presets.json";
+const presetName = ref("");
+const presetNames = ref<string[]>([]);
+const selectedPreset = ref("");
+
+async function refreshPresetNames() {
+  const store = await load(PRESET_STORE, { defaults: {}, autoSave: false });
+  presetNames.value = await store.keys();
+}
+async function savePreset() {
+  if (!presetName.value.trim()) return;
+  const store = await load(PRESET_STORE, { defaults: {}, autoSave: false });
+  await store.set(presetName.value.trim(), { ...form });
+  await store.save();
+  await refreshPresetNames();
+  selectedPreset.value = presetName.value.trim();
+}
+async function loadPreset() {
+  if (!selectedPreset.value) return;
+  const store = await load(PRESET_STORE, { defaults: {}, autoSave: false });
+  const cfg = await store.get<ConfigInput>(selectedPreset.value);
+  if (cfg) Object.assign(form, cfg);
+}
+async function deletePreset() {
+  if (!selectedPreset.value) return;
+  const store = await load(PRESET_STORE, { defaults: {}, autoSave: false });
+  await store.delete(selectedPreset.value);
+  await store.save();
+  selectedPreset.value = "";
+  await refreshPresetNames();
+}
+onMounted(refreshPresetNames);
 </script>
 
 <template>
@@ -56,6 +91,22 @@ async function apply() { await invoke("update_config", { config: { ...form } });
       <button :disabled="!running" @click="apply">{{ t("config.apply") }}</button>
     </div>
     <p v-if="listenPorts">{{ t("config.listening", { mgmt: listenPorts.mgmt, data: listenPorts.data }) }}</p>
+
+    <!-- Presets -->
+    <hr />
+    <h4>{{ t("preset.title") }}</h4>
+    <div class="preset-save">
+      <input v-model="presetName" :placeholder="t('preset.namePlaceholder')" />
+      <button @click="savePreset" :disabled="!presetName.trim()">{{ t("preset.save") }}</button>
+    </div>
+    <div class="preset-load">
+      <select v-model="selectedPreset">
+        <option value="" disabled>{{ t("preset.select") }}</option>
+        <option v-for="name in presetNames" :key="name" :value="name">{{ name }}</option>
+      </select>
+      <button @click="loadPreset" :disabled="running || !selectedPreset">{{ t("preset.load") }}</button>
+      <button @click="deletePreset" :disabled="!selectedPreset">{{ t("preset.delete") }}</button>
+    </div>
   </section>
 </template>
 
@@ -64,4 +115,6 @@ async function apply() { await invoke("update_config", { config: { ...form } });
 label { display: flex; justify-content: space-between; gap: 8px; }
 .phasor-row { font-size: 12px; }
 .actions { display: flex; gap: 8px; margin-top: 8px; }
+.preset-save { display: flex; gap: 6px; }
+.preset-load { display: flex; gap: 6px; }
 </style>

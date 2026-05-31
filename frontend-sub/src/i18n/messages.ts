@@ -50,6 +50,13 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg2Received': '收到主站下传 CFG-2',
     'event.streamingStarted': '开始推流',
     'event.streamingStopped': '停止推流',
+    // Config presets
+    'preset.title': '配置预设',
+    'preset.namePlaceholder': '预设名称',
+    'preset.save': '保存预设',
+    'preset.select': '选择预设',
+    'preset.load': '加载',
+    'preset.delete': '删除',
   },
   en: {
     // App / title bar
@@ -100,5 +107,12 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg2Received': 'CFG-2 received from master',
     'event.streamingStarted': 'Streaming started',
     'event.streamingStopped': 'Streaming stopped',
+    // Config presets
+    'preset.title': 'Config Presets',
+    'preset.namePlaceholder': 'Preset name',
+    'preset.save': 'Save Preset',
+    'preset.select': 'Select preset',
+    'preset.load': 'Load',
+    'preset.delete': 'Delete',
   },
 }
