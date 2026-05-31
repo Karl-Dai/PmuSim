@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="180" viewBox="0 0 880 180" role="img" aria-label="PmuSim — PMU Master Station Simulator">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563a8"/>
+      <stop offset="1" stop-color="#1d4f88"/>
+    </linearGradient>
+  </defs>
+  <rect width="880" height="180" rx="14" fill="url(#bg)"/>
+  <!-- radar sweep arcs -->
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2">
+    <circle cx="120" cy="90" r="34"/>
+    <circle cx="120" cy="90" r="58"/>
+    <circle cx="120" cy="90" r="82"/>
+  </g>
+  <!-- phasor vectors -->
+  <g stroke-width="3" stroke-linecap="round">
+    <line x1="120" y1="90" x2="120" y2="34" stroke="#e3b341"/>
+    <line x1="120" y1="90" x2="168" y2="118" stroke="#7fd0a0"/>
+    <line x1="120" y1="90" x2="72" y2="118" stroke="#9ec5f0"/>
+  </g>
+  <circle cx="120" cy="90" r="5" fill="#ffffff"/>
+  <!-- wordmark -->
+  <text x="250" y="86" font-family="-apple-system, 'Segoe UI', Roboto, sans-serif" font-size="58" font-weight="800" fill="#ffffff">PmuSim</text>
+  <text x="252" y="126" font-family="-apple-system, 'Segoe UI', Roboto, sans-serif" font-size="21" fill="#cfe0f5">PMU Master-Station Simulator · V2 (2006) &amp; V3 (2011)</text>
+</svg>
