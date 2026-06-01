@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- 新增 PMU 子站(数据发送方)模拟器 `pmusim-sub`：独立 Tauri App，支持 V2/V3 双协议、命令响应全握手、可配置正弦相量数据生成(Δf/ROCOF)、中/英双语界面、CFG-2 配置预设(JSON 保存/加载)，与主站对标可本地互测。
+## [0.5.0] - 2026-06-01
+
+### Highlights / 亮点
+
+- 🛰️ 全新 PMU 子站(数据发送方)模拟器 **PmuSub**：独立桌面应用，可与主站本地互测,不再需要真实子站或半成品脚本 / New PMU substation (data-sender) simulator **PmuSub** — a standalone desktop app you can test the master against locally, no real substation or half-broken script needed.
+- 📦 一次发布两个安装包:主站 `PmuSim_*` 与子站 `PmuSub_*` 同 tag 随 release 一起分发 / Both apps ship from one release — master `PmuSim_*` and substation `PmuSub_*` installers attached to the same tag.
+- 🟡 修复主站「假已连接」:TCP 连上但子站未回 CFG-1 时显示琥珀色「连接中」,真正收到 PMU 帧才转绿「已连接」 / Fixed the master's false "已连接": amber **连接中 (connecting)** while the TCP socket is up but no CFG-1 has arrived; green **已连接 (connected)** only after a real PMU frame.
+- 📖 README 全面重做:SVG banner、中/EN 实拍截图、握手演示 GIF、引导式快速上手、FAQ/路线图/贡献 / README fully redesigned: SVG banner, 中/EN screenshots, handshake demo GIF, guided Quick Start, FAQ / Roadmap / Contributing.
+
+### Added 新增
+
+- PMU 子站模拟器 `pmusim-sub`(产品名 PmuSub):独立 Tauri 2 App,支持 V2/V3 双协议、命令响应全握手、可配置正弦相量数据生成(Δf/ROCOF)、中/英双语界面、CFG-2 配置预设(JSON 保存/加载),与主站对标可本地互测 / Substation simulator `pmusim-sub` (product PmuSub): standalone Tauri 2 app — V2/V3 dual protocol, full command-response handshake, configurable sinusoidal phasor data generation (Δf/ROCOF), bilingual 中/EN UI, CFG-2 config presets (JSON save/load); designed to interop-test against the master locally.
+- 会话新增「连接中」状态(idcode 仍是占位 `host:port` 时),与「已连接」(子站已回帧、re-key 为真实 IDCODE)区分 / New `connecting` session state (while the idcode is still the placeholder `host:port`), distinct from `connected` (substation has replied and the session re-keyed to its real IDCODE).
+
+### Changed 改进
+
+- 发布流程同时构建并附带子站安装包:`release.yml` 新增非阻塞 `release-sub` job(macOS×2 / Windows x64 / Linux),`build-release-notes` 下载表拆分为「主站 PmuSim / 子站 PmuSub」两节。子站无 in-app updater,故不签名、不进 update manifest / Release pipeline now also builds the substation: `release.yml` gains a non-blocking `release-sub` job (macOS×2 / Windows x64 / Linux); the release-notes download table splits into 主站 PmuSim / 子站 PmuSub. The sub has no in-app updater, so it is unsigned and excluded from the update manifest.
+- README.md / README_CN.md 精简重构,协议大表折叠进 `<details>`,新增 FAQ / 路线图 / 贡献指南 / 致谢;旧 simpmufep 截图替换为当前 PmuSim 实拍 / README.md / README_CN.md restructured leaner — protocol tables folded into `<details>`, new FAQ / Roadmap / Contributing / Acknowledgments; stale simpmufep screenshot replaced with current PmuSim captures.
+
+### Fixed 修复
+
+- 主站「假已连接」:子站命令端口能 TCP accept 但不是真 PMU(不回 CFG-1)时,状态栏曾一直绿字「已连接」直到心跳超时。现占位会话(`host:port`)显示琥珀色「连接中」,仅在子站真正回帧后才转绿 / Master false "已连接": when a command port accepts TCP but isn't a real PMU (never returns CFG-1), the status stayed green "已连接" until heartbeat timeout. Placeholder sessions (`host:port`) now read amber **连接中**; green only after the substation actually replies.
 
 ## [0.4.0] - 2026-05-29
 

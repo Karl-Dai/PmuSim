@@ -31,6 +31,8 @@ const CN_MIRROR_BANNER = [
   '> 🌍 **Users in mainland China**: if the in-app updater fails on first upgrade from a previous version, download installers from the mirror above (later versions will auto-fallback through proxies).',
 ].join('\n')
 
+// 主站 PmuSim (master station). Built by the `release` job; arm64 Windows + MSI
+// included. This is the app with in-app auto-update.
 const PLATFORMS = [
   { label: 'macOS Apple Silicon', file: (v) => `PmuSim_${v}_aarch64.dmg` },
   { label: 'macOS Intel',         file: (v) => `PmuSim_${v}_x64.dmg` },
@@ -40,6 +42,18 @@ const PLATFORMS = [
   { label: 'Linux AppImage',      file: (v) => `PmuSim_${v}_amd64.AppImage` },
   { label: 'Linux deb',           file: (v) => `PmuSim_${v}_amd64.deb` },
   { label: 'Linux rpm',           file: (v) => `PmuSim-${v}-1.x86_64.rpm` },
+]
+
+// 子站 PmuSub (substation / data sender). Built by the `release-sub` job
+// (macOS x2, Windows x64, Linux). No arm64 Windows, no in-app updater.
+const SUB_PLATFORMS = [
+  { label: 'macOS Apple Silicon', file: (v) => `PmuSub_${v}_aarch64.dmg` },
+  { label: 'macOS Intel',         file: (v) => `PmuSub_${v}_x64.dmg` },
+  { label: 'Windows x64 (NSIS)',  file: (v) => `PmuSub_${v}_x64-setup.exe` },
+  { label: 'Windows x64 (MSI)',   file: (v) => `PmuSub_${v}_x64_en-US.msi` },
+  { label: 'Linux AppImage',      file: (v) => `PmuSub_${v}_amd64.AppImage` },
+  { label: 'Linux deb',           file: (v) => `PmuSub_${v}_amd64.deb` },
+  { label: 'Linux rpm',           file: (v) => `PmuSub-${v}-1.x86_64.rpm` },
 ]
 
 export function buildBody(tag, changelog) {
@@ -55,11 +69,21 @@ export function buildBody(tag, changelog) {
   lines.push('')
   lines.push('## 下载 / Downloads')
   lines.push('')
-  lines.push('下方资产里按平台选择 / Pick the asset for your platform below:')
+  lines.push('下方资产里按平台选择 / Pick the asset for your platform below.')
+  lines.push('')
+  lines.push('### 主站 PmuSim — PMU Master Station')
   lines.push('')
   lines.push('| 平台 / Platform | 文件名 / Asset |')
   lines.push('|---|---|')
   for (const p of PLATFORMS) {
+    lines.push(`| ${p.label} | \`${p.file(version)}\` |`)
+  }
+  lines.push('')
+  lines.push('### 子站 PmuSub — PMU Substation (data sender)')
+  lines.push('')
+  lines.push('| 平台 / Platform | 文件名 / Asset |')
+  lines.push('|---|---|')
+  for (const p of SUB_PLATFORMS) {
     lines.push(`| ${p.label} | \`${p.file(version)}\` |`)
   }
   lines.push('')

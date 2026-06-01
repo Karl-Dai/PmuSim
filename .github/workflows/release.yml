@@ -92,8 +92,77 @@ jobs:
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
+  # Substation simulator (PmuSub). Mirrors the master `release` job but builds
+  # crates/pmusim-sub instead. The sub has NO in-app updater, so it needs no
+  # signing key, produces no .sig, and is excluded from the update manifest
+  # (gen-update-manifest only globs PmuSim_*). The whole job is non-blocking:
+  # this is the sub's first time through CI, and a failure here must not fail
+  # the release / leave it stuck as a draft — the master installers still ship.
+  release-sub:
+    permissions:
+      contents: write
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            rust_target: aarch64-apple-darwin
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ''
+            rust_target: ''
+          - platform: windows-latest
+            args: ''
+            rust_target: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend-sub/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        working-directory: frontend-sub
+        run: npm ci
+
+      - name: Build and release (substation)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/pmusim-sub
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PmuSim ${{ github.ref_name }}'
+          # Same release as the master job — both apps attach their installers
+          # to the one tag. Keep it a draft; publish-manifest clears the flag.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
+
   publish-manifest:
-    needs: release
+    # Wait for BOTH apps. release-sub is continue-on-error, so a sub build
+    # failure still lets this run and ship the master installers + manifest.
+    needs: [release, release-sub]
     runs-on: ubuntu-latest
     permissions:
       contents: write
