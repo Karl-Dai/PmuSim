@@ -208,10 +208,20 @@ impl SubStation {
                         &evt, &data_writer, &stream_task,
                     ).await;
                 }
-                Frame::Config(_cfg) => {
-                    // 主站下传 CFG-2 配置帧 → 回 ACK（V3 §8.6）。
-                    emit_event(&evt, SubEvent::Cfg2Received);
-                    Self::send_cmd(&writer, &settings, &evt, Cmd::Ack as u16).await;
+                Frame::Config(cfg) => {
+                    // 主站下传 CFG-2 配置帧 → 先按 §6 校验上送周期合法性，
+                    // 再按 §8.6 回 ACK / NACK。
+                    match cfg.illegal_period_reason() {
+                        Some(reason) => {
+                            // 非法上送周期（如 PERIOD=0）：回 NACK 拒绝，保持原 fps 不变。
+                            emit_event(&evt, SubEvent::Cfg2Rejected { reason });
+                            Self::send_cmd(&writer, &settings, &evt, Cmd::Nack as u16).await;
+                        }
+                        None => {
+                            emit_event(&evt, SubEvent::Cfg2Received);
+                            Self::send_cmd(&writer, &settings, &evt, Cmd::Ack as u16).await;
+                        }
+                    }
                 }
                 Frame::Data(_) => { /* 子站不应在管理管道收数据帧 */ }
             }

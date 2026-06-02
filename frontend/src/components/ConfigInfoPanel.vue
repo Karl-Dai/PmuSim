@@ -66,6 +66,29 @@ const dataPortLabel = computed(() =>
 const rateHz = ref("100"); // PERIOD inverse → user-visible Hz
 const heartbeatSecs = ref("5");
 
+// 异常注入：勾选后用原始 PERIOD 值直发 CFG-2（允许 0），绕过 Hz→PERIOD 换算，
+// 用于受控注入规约未定义的非法上送周期，验证子站 NACK 应对。
+const injectAbnormal = ref(false);
+const rawPeriod = ref("0");
+
+async function injectPeriod() {
+  const s = session.value;
+  if (!s) return; // 按钮 disabled 已兜底
+  if (s.state !== "streaming" && s.state !== "cfg2_sent") return;
+  const p = parseInt(rawPeriod.value);
+  if (!Number.isFinite(p) || p < 0 || p > 65535) {
+    pushToast(t("config.injectBadValue"), "error");
+    return;
+  }
+  try {
+    await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2_cmd", period: null });
+    await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2", period: p });
+    pushToast(t("config.injectSent", { period: String(p) }), "info");
+  } catch (e) {
+    pushToast(t("config.injectFailed", { error: toastError(e) }), "error");
+  }
+}
+
 // Selected session for IDCODE / status display.
 const session = computed(() => sessions.get(selectedIdcode.value));
 const cfg = computed(() => configs.get(selectedIdcode.value));
@@ -239,6 +262,21 @@ watch(rateHz, debounced<string>(250, async (v) => {
             <option value="200">200 Hz</option>
           </select>
           <span class="readback">{{ ratePeriodReadback ? `(${ratePeriodReadback})` : "" }}</span>
+        </div>
+      </div>
+      <div class="row">
+        <label>{{ t("config.abnormalInject") }}</label>
+        <input type="checkbox" v-model="injectAbnormal" />
+      </div>
+      <div class="row" v-if="injectAbnormal">
+        <label>{{ t("config.rawPeriod") }}</label>
+        <div class="ctl-with-suffix">
+          <input v-model="rawPeriod" inputmode="numeric" style="width: 80px" />
+          <button
+            class="btn"
+            @click="injectPeriod"
+            :disabled="!session || (session.state !== 'streaming' && session.state !== 'cfg2_sent')"
+          >{{ t("config.inject") }}</button>
         </div>
       </div>
       <div class="row">

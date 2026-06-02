@@ -90,6 +90,24 @@ impl ConfigFrame {
         (self.period as f64 / 100.0) * (1000.0 / base_freq)
     }
 
+    /// 上送周期合法性校验（规约 §6 校验机制）。PERIOD=0 在 GB/T 26865.2 /
+    /// IEEE C37.118.2 数据率字段中超出定义域（未定义行为），判为非法。
+    /// 返回 `Some(中文原因)` 表示非法，`None` 表示合法。
+    /// 扩展点：未来如需校验合法上下限，在此追加分支。
+    pub fn illegal_period_reason(&self) -> Option<String> {
+        // 多 PMU：任一块周期为 0 即非法；无块时退回顶层便利字段 period。
+        let any_zero = if self.pmu_blocks.is_empty() {
+            self.period == 0
+        } else {
+            self.pmu_blocks.iter().any(|b| b.period == 0)
+        };
+        if any_zero {
+            Some("上送周期为 0（非法，超出规约定义域）".to_string())
+        } else {
+            None
+        }
+    }
+
     /// Scaling factor for analog channel `index`. Reads the low 24 bits
     /// of ANUNIT as a signed integer and applies the spec multiplier
     /// 0.00001. The high byte (analog type code) is masked off so an
@@ -162,4 +180,69 @@ pub enum Frame {
     Command(CommandFrame),
     Config(ConfigFrame),
     Data(DataFrame),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::constants::ProtocolVersion;
+
+    /// 构造一个最小 ConfigFrame：顶层 period + 任意个 PMU 块（各自 period）。
+    fn cfg(period: u16, block_periods: &[u16]) -> ConfigFrame {
+        ConfigFrame {
+            version: ProtocolVersion::V3,
+            cfg_type: 3,
+            idcode: "TEST".into(),
+            soc: 0,
+            fracsec: 0,
+            d_frame: 0,
+            meas_rate: 1_000_000,
+            num_pmu: 1,
+            stn: "S".into(),
+            pmu_idcode: "TEST".into(),
+            format_flags: 0,
+            phnmr: 0,
+            annmr: 0,
+            dgnmr: 0,
+            channel_names: vec![],
+            phunit: vec![],
+            anunit: vec![],
+            digunit: vec![],
+            fnom: 1,
+            period,
+            pmu_blocks: block_periods
+                .iter()
+                .map(|&p| PmuBlock {
+                    stn: "S".into(),
+                    pmu_idcode: "TEST".into(),
+                    format_flags: 0,
+                    phnmr: 0,
+                    annmr: 0,
+                    dgnmr: 0,
+                    channel_names: vec![],
+                    phunit: vec![],
+                    anunit: vec![],
+                    digunit: vec![],
+                    fnom: 1,
+                    period: p,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn period_zero_is_illegal() {
+        // 顶层 period=0 且无 PMU 块 → 非法
+        assert!(cfg(0, &[]).illegal_period_reason().is_some());
+        // 多 PMU 块中任一块 period=0 → 非法
+        assert!(cfg(100, &[100, 0]).illegal_period_reason().is_some());
+    }
+
+    #[test]
+    fn legal_period_passes() {
+        // 有块且都非 0 → 合法
+        assert!(cfg(100, &[100]).illegal_period_reason().is_none());
+        // 无块、顶层非 0 → 合法
+        assert!(cfg(100, &[]).illegal_period_reason().is_none());
+    }
 }

@@ -17,6 +17,8 @@ pub enum SubEvent {
     Cfg2Sent,
     /// 收到主站下传的 CFG-2 配置帧。
     Cfg2Received,
+    /// 收到主站下传的 CFG-2 但上送周期非法 → 已回 NACK 拒绝（携原因）。
+    Cfg2Rejected { reason: String },
     /// 数据推流开始/停止。
     StreamingStarted,
     StreamingStopped,

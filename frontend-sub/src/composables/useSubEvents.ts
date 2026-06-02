@@ -40,6 +40,9 @@ export function useSubEvents() {
       case "Cfg1Sent": pushEvent(t("event.cfg1Sent")); break;
       case "Cfg2Sent": pushEvent(t("event.cfg2Sent")); break;
       case "Cfg2Received": pushEvent(t("event.cfg2Received")); break;
+      case "Cfg2Rejected":
+        pushEvent(t("event.cfg2Rejected", { reason: ev.reason }), "error");
+        break;
       case "StreamingStarted": streaming.value = true; pushEvent(t("event.streamingStarted")); break;
       case "StreamingStopped": streaming.value = false; resetRate(); pushEvent(t("event.streamingStopped")); break;
       case "DataFrameSent": lastData.value = ev.data; sentCount.value++; tickRate(); break;
