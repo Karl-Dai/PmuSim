@@ -13,6 +13,7 @@ export type SubEvent =
   | { type: "Cfg1Sent" }
   | { type: "Cfg2Sent" }
   | { type: "Cfg2Received" }
+  | { type: "Cfg2Rejected"; reason: string }
   | { type: "StreamingStarted" }
   | { type: "StreamingStopped" }
   | { type: "DataFrameSent"; data: SubDataInfo }

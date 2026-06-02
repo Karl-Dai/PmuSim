@@ -48,6 +48,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg1Sent': '已上传 CFG-1',
     'event.cfg2Sent': '已上传 CFG-2',
     'event.cfg2Received': '收到主站下传 CFG-2',
+    'event.cfg2Rejected': '收到非法上送周期,已回 NACK 拒绝: {reason}',
     'event.streamingStarted': '开始推流',
     'event.streamingStopped': '停止推流',
     // Config presets
@@ -105,6 +106,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg1Sent': 'CFG-1 uploaded',
     'event.cfg2Sent': 'CFG-2 uploaded',
     'event.cfg2Received': 'CFG-2 received from master',
+    'event.cfg2Rejected': 'Illegal reporting period — sent NACK: {reason}',
     'event.streamingStarted': 'Streaming started',
     'event.streamingStopped': 'Streaming stopped',
     // Config presets
