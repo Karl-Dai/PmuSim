@@ -76,7 +76,7 @@ async function injectPeriod() {
   if (!s) return; // 按钮 disabled 已兜底
   if (s.state !== "streaming" && s.state !== "cfg2_sent") return;
   const p = parseInt(rawPeriod.value);
-  if (!Number.isFinite(p) || p < 0) {
+  if (!Number.isFinite(p) || p < 0 || p > 65535) {
     pushToast(t("config.injectBadValue"), "error");
     return;
   }
