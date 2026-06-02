@@ -43,6 +43,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.injectSent': '已注入 PERIOD={period}',
     'config.injectFailed': '注入失败: {error}',
     'config.injectBadValue': 'PERIOD 取值非法',
+    'config.skipCfg2': '跳过 CFG-2',
+    'config.skipCfg2Connect': '连接(跳过 CFG-2)',
     // Session state
     'state.connecting': '连接中',
     'state.connected': '已连接',
@@ -96,6 +98,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg1Received': '收到 CFG-1 ({analog} 模拟量 / {digital} 开关量组)',
     'event.cfg2Sent': '已下传 CFG-2',
     'event.dataEstablished': '数据管道建立',
+    'event.cfg2Skipped': '异常注入: 跳过 CFG-2,仅凭 CFG-1 开流',
     'event.dataPaused': '数据管道暂停',
     'event.heartbeatTimeoutToast': '{idcode}: 心跳超时,已断开',
     'event.heartbeatTimeout': '心跳超时: {idcode}',
@@ -142,6 +145,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.injectSent': 'Injected PERIOD={period}',
     'config.injectFailed': 'Injection failed: {error}',
     'config.injectBadValue': 'Invalid PERIOD value',
+    'config.skipCfg2': 'Skip CFG-2',
+    'config.skipCfg2Connect': 'Connect, skip CFG-2',
     // Session state
     'state.connecting': 'Connecting',
     'state.connected': 'Connected',
@@ -195,6 +200,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.cfg1Received': 'CFG-1 received ({analog} analog / {digital} digital groups)',
     'event.cfg2Sent': 'CFG-2 sent',
     'event.dataEstablished': 'Data pipe established',
+    'event.cfg2Skipped': 'Injection: skipped CFG-2, streaming via CFG-1 only',
     'event.dataPaused': 'Data pipe paused',
     'event.heartbeatTimeoutToast': '{idcode}: Heartbeat timeout, disconnected',
     'event.heartbeatTimeout': 'Heartbeat timeout: {idcode}',

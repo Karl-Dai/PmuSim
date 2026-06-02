@@ -7,6 +7,7 @@ pub enum PmuEvent {
     SessionDisconnected { idcode: String },
     Cfg1Received { idcode: String, cfg: ConfigInfo },
     Cfg2Sent { idcode: String },
+    Cfg2Skipped { idcode: String },
     Cfg2Received { idcode: String, cfg: ConfigInfo },
     StreamingStarted { idcode: String },
     StreamingStopped { idcode: String },

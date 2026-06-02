@@ -46,6 +46,7 @@ export type PmuEvent =
   | { type: "SessionDisconnected"; idcode: string }
   | { type: "Cfg1Received"; idcode: string; cfg: ConfigInfo }
   | { type: "Cfg2Sent"; idcode: string }
+  | { type: "Cfg2Skipped"; idcode: string }
   | { type: "Cfg2Received"; idcode: string; cfg: ConfigInfo }
   | { type: "StreamingStarted"; idcode: string }
   | { type: "StreamingStopped"; idcode: string }

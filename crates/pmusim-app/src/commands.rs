@@ -98,6 +98,16 @@ pub async fn auto_handshake(
 }
 
 #[tauri::command]
+pub async fn skip_cfg2_open(
+    state: State<'_, AppState>,
+    idcode: String,
+) -> Result<(), String> {
+    let guard = state.master.lock().await;
+    let master = guard.as_ref().ok_or("Server not running")?;
+    master.skip_cfg2_open(idcode).await
+}
+
+#[tauri::command]
 pub async fn disconnect_substation(
     state: State<'_, AppState>,
     idcode: String,

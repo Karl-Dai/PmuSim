@@ -17,6 +17,7 @@ fn main() {
             commands::disconnect_substation,
             commands::send_command,
             commands::auto_handshake,
+            commands::skip_cfg2_open,
             commands::set_heartbeat_interval,
             commands::poll_events,
             commands::open_url,

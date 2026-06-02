@@ -235,3 +235,62 @@ async fn v3_master_pushes_period_zero_gets_nacked() {
     master.stop().await;
     sub.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v3_master_skips_cfg2_streams_via_cfg1() {
+    let (mut sub, _sub_rx, mgmt_port) = spawn_substation(ProtocolVersion::V3).await;
+
+    let (m_tx, mut m_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    let mut master = MasterStation::new(m_tx, 0, 30.0, ProtocolVersion::V3);
+    master.start().await.unwrap();
+    master
+        .connect_to_substation("127.0.0.1".into(), mgmt_port, 0, ProtocolVersion::V3)
+        .await
+        .unwrap();
+
+    let placeholder = match wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::SessionCreated { .. })).await {
+        PmuEvent::SessionCreated { idcode, .. } => idcode,
+        _ => unreachable!(),
+    };
+
+    // 跳过 CFG-2 的握手:召唤 CFG-1 → 直接 OpenData(不发任何 CFG-2)。
+    master.skip_cfg2_open(placeholder).await.unwrap();
+
+    // 收集到 StreamingStarted 为止的所有主站事件,断言:见到 CFG-1 + Cfg2Skipped,
+    // 且全程没有任何 CFG-2 事件(确实跳过)。match &ev 借用,避免在 panic 分支里 use-after-move。
+    let mut saw_cfg1 = false;
+    let mut saw_skipped = false;
+    loop {
+        let ev = timeout(Duration::from_secs(8), m_rx.recv())
+            .await
+            .expect("master event timeout")
+            .expect("master channel closed");
+        match &ev {
+            PmuEvent::Cfg1Received { cfg, .. } => {
+                assert_eq!(cfg.annmr, 2);
+                assert_eq!(cfg.dgnmr, 1);
+                saw_cfg1 = true;
+            }
+            PmuEvent::Cfg2Skipped { .. } => saw_skipped = true,
+            PmuEvent::Cfg2Sent { .. } | PmuEvent::Cfg2Received { .. } => {
+                panic!("跳过 CFG-2 路径不应出现 CFG-2 事件: {ev:?}");
+            }
+            PmuEvent::StreamingStarted { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(saw_cfg1, "应收到 CFG-1(维度来源)");
+    assert!(saw_skipped, "应收到 Cfg2Skipped 注入标记");
+
+    // 凭 CFG-1 维度成功解出 DataFrame。
+    let data = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::DataFrame { .. })).await;
+    let PmuEvent::DataFrame { idcode, data } = data else { unreachable!() };
+    assert_eq!(idcode, IDCODE);
+    assert_eq!(data.phasors.len(), 1);
+    assert_eq!(data.analog.len(), 2);
+    assert_eq!(data.digital, vec![0x000A]);
+
+    master.stop().await;
+    sub.stop().await;
+}
+

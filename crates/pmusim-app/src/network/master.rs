@@ -60,6 +60,9 @@ enum MasterCmd {
         idcode: String,
         period: Option<u16>,
     },
+    SkipCfg2Open {
+        idcode: String,
+    },
     Disconnect {
         idcode: String,
     },
@@ -230,6 +233,13 @@ impl MasterStation {
                 idcode,
                 period: period.map(|p| p as u16),
             })
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn skip_cfg2_open(&self, idcode: String) -> Result<(), String> {
+        self.cmd_tx
+            .send(MasterCmd::SkipCfg2Open { idcode })
             .await
             .map_err(|e| e.to_string())
     }
@@ -486,6 +496,9 @@ impl MasterStation {
                 }
                 MasterCmd::AutoHandshake { idcode, period } => {
                     Self::do_auto_handshake(&sessions, &cmd_tx, &event_tx, &idcode, period).await;
+                }
+                MasterCmd::SkipCfg2Open { idcode } => {
+                    Self::do_skip_cfg2_open(&sessions, &cmd_tx, &event_tx, &idcode).await;
                 }
                 MasterCmd::Disconnect { idcode } => {
                     Self::do_disconnect(&sessions, &event_tx, &idcode).await;
@@ -1600,6 +1613,70 @@ impl MasterStation {
                 idcode: current,
             },
         );
+    }
+
+    /// 受控注入 V4：跳过 CFG-2 仅凭 CFG-1 开流。等于 do_auto_handshake 砍掉
+    /// 「下传 CFG-2 命令 / 下传 CFG-2 配置帧 / 召唤 CFG-2」三步:召唤 CFG-1 →
+    /// (跳过) → OpenData。走内部 do_send_cmd(OpenData),天然绕过 command_loop
+    /// 里手动 OpenData 的 Cfg2Sent|Streaming 门控。
+    /// 已知缺口:若该会话流式期间子站宣告配置变更(STAT bit10),data_read_loop_outbound
+    /// 会 re-enqueue 完整的 AutoHandshake(含 CFG-2),即刷新不再"跳过 CFG-2"。本注入特性
+    /// 暂不提供"跳过 CFG-2 的刷新"变体。
+    async fn do_skip_cfg2_open(
+        sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+        cmd_tx: &mpsc::Sender<MasterCmd>,
+        event_tx: &EventSender,
+        idcode: &str,
+    ) {
+        // 捕获 peer,跨 re-key 跟踪会话(SendCfg1 后子站真实 IDCODE 到达会重命名会话)。
+        let peer = {
+            let r = sessions.read().await;
+            r.get(idcode).map(|s| (s.peer_host.clone(), s.peer_mgmt_port))
+        };
+        let Some((peer_host, peer_port)) = peer else {
+            emit_event(event_tx, PmuEvent::Error {
+                idcode: idcode.to_string(),
+                error: "Session not found".into(),
+            });
+            return;
+        };
+
+        // 召唤 CFG-1,等它到达(维度缓存进 session.cfg1)。
+        Self::do_send_cmd(sessions, event_tx, idcode, Cmd::SendCfg1 as u16).await;
+        let current = match wait_for_cfg1(
+            sessions,
+            &peer_host,
+            peer_port,
+            std::time::Duration::from_secs(2),
+        )
+        .await
+        {
+            Some(id) => id,
+            None => {
+                emit_event(event_tx, PmuEvent::Error {
+                    idcode: idcode.to_string(),
+                    error: "CFG-1 not received after request".into(),
+                });
+                return;
+            }
+        };
+
+        // 跳过:下传 CFG-2 命令 / 下传 CFG-2 配置帧 / 召唤 CFG-2。打一个注入标记事件。
+        emit_event(event_tx, PmuEvent::Cfg2Skipped { idcode: current.clone() });
+
+        // 开数据管道(V3) + OpenData(CFG-2 三步已故意跳过)。管道打开失败则不发 OpenData、不谎报 streaming。
+        if !Self::do_open_data_v3(sessions, cmd_tx, event_tx, &current).await {
+            return;
+        }
+        Self::do_send_cmd(sessions, event_tx, &current, Cmd::OpenData as u16).await;
+        {
+            let mut sessions_w = sessions.write().await;
+            if let Some(session) = sessions_w.get_mut(&current) {
+                session.state = SessionState::Streaming;
+                session.cfg_change_seen = false;
+            }
+        }
+        emit_event(event_tx, PmuEvent::StreamingStarted { idcode: current });
     }
 }
 
