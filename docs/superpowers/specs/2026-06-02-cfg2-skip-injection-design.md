@@ -65,7 +65,7 @@
 - 在既有「异常注入」勾选区内加按钮 **「跳过 CFG-2 连接」**。
 - 其 handler `skipCfg2Connect()` 复用 `startEverything` 的连接管线（`start_server` 若未起 + `set_heartbeat_interval` + `connect_substation` 若无 session），末步把 `auto_handshake` 换成 `invoke("skip_cfg2_open", { idcode: target })`（**不传 period**，`target` 同 :174 的 `host:port` 占位逻辑）。
 - 共用 `busy` 守卫，避免与正常「连接」并发。
-- `frontend/src/composables/usePmuEvents.ts`：处理 `Cfg2Skipped` 事件 → `pushEvent(t("event.cfg2Skipped"), "warn")`（注入标记，非错误，故用 warn 级）。
+- `frontend/src/composables/usePmuEvents.ts`：处理 `Cfg2Skipped` 事件 → `pushEvent(t("event.cfg2Skipped"), "info")`（注入标记，非错误；`useEventLog` 仅支持 `info|error` 两级，故用 info）。
 - `frontend/src/types/index.ts`：`PmuEvent` 联合类型加 `{ type: "Cfg2Skipped"; idcode: string }`。
 - `frontend/src/i18n/messages.ts`：加按钮文案 `config.skipCfg2Connect` + 事件文案 `event.cfg2Skipped`（中/英）。
 
