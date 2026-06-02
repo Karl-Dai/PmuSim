@@ -55,6 +55,9 @@ export function usePmuEvents() {
         updateState(payload.idcode, "cfg2_sent");
         pushEvent(t("event.cfg2Sent"));
         break;
+      case "Cfg2Skipped":
+        pushEvent(t("event.cfg2Skipped"), "info");
+        break;
       case "Cfg2Received":
         setConfig(payload.idcode, payload.cfg);
         break;

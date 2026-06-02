@@ -180,6 +180,37 @@ async function startEverything() {
   }
 }
 
+// 受控注入:跳过 CFG-2,仅凭 CFG-1 开流。与正常「连接」二选一 —— 同样
+// start_server + connect,但末步用 skip_cfg2_open 取代 auto_handshake,
+// 且不传 period(CFG-2 被跳过,子站按自身 fps 推流)。
+async function skipCfg2Connect() {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    await listenerReady;
+    if (!running.value) {
+      const dataPort = protocol.value === "V3" ? 0 : parseInt(connDataPort.value);
+      await invoke("start_server", { dataPort, protocol: protocol.value });
+      running.value = true;
+    }
+    const hb = parseFloat(heartbeatSecs.value);
+    if (Number.isFinite(hb) && hb > 0) {
+      await invoke("set_heartbeat_interval", { seconds: hb });
+    }
+    if (!session.value) {
+      const mgmt = parseInt(connMgmtPort.value);
+      const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
+      await invoke("connect_substation", { host: connIp.value.trim(), port: mgmt, dataPort: data });
+    }
+    const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
+    await invoke("skip_cfg2_open", { idcode: target });
+  } catch (e) {
+    pushToast(t("config.startFailed", { error: toastError(e) }), "error");
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function stopEverything() {
   if (busy.value) return;
   busy.value = true;
@@ -278,6 +309,10 @@ watch(rateHz, debounced<string>(250, async (v) => {
             :disabled="!session || (session.state !== 'streaming' && session.state !== 'cfg2_sent')"
           >{{ t("config.inject") }}</button>
         </div>
+      </div>
+      <div class="row" v-if="injectAbnormal">
+        <label>{{ t("config.skipCfg2") }}</label>
+        <button class="btn" @click="skipCfg2Connect" :disabled="busy || running">{{ t("config.skipCfg2Connect") }}</button>
       </div>
       <div class="row">
         <label>{{ t("config.heartbeat") }}</label>
