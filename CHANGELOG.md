@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Highlights / 亮点
+
+- 🧪 受控异常注入 V3:主站可直发「非法上送周期」的 CFG-2(原始 PERIOD,含 0 与越界值),绕过 Hz→PERIOD 换算,用来验证子站对规约未定义周期的应对 / Controlled abnormal injection (V3): the master can now push a CFG-2 carrying an *illegal* reporting period (raw PERIOD, including 0 / out-of-range), bypassing the Hz→PERIOD conversion — for exercising how a substation handles a period the spec never defines.
+- 🛡️ 子站校验上送周期:下传 CFG-2 时若 PERIOD 非法(0)则回 NACK 拒绝,不再盲目接受坏配置 / Substation now validates the reporting period on an incoming CFG-2 — an illegal PERIOD (0) is rejected with a NACK instead of being silently accepted.
+- 📣 拒绝过程全程可见:子站事件区实时展示「已回 NACK 拒绝」(含原因),主站端 NACK 不再被静默吞掉而是上抛错误提示 / The rejection is fully visible end-to-end: the substation event log shows the NACK (with reason) live, and on the master side a NACK is no longer swallowed silently but surfaced as an error.
+
+### Added 新增
+
+- 主站「异常注入」入口:配置面板新增勾选项,展开后可填原始 PERIOD 值并一键「注入」直发 CFG-2,按钮仅在会话处于 streaming / cfg2_sent 时可用 / Master "abnormal injection" entry: a checkbox in the config panel reveals a raw-PERIOD field and an **Inject** button that sends the CFG-2 directly; enabled only while the session is in `streaming` / `cfg2_sent`.
+- `pmusim-core` 新增 `ConfigFrame::illegal_period_reason`,集中判定上送周期是否非法(PERIOD=0)/ `pmusim-core` gains `ConfigFrame::illegal_period_reason`, centralizing the check for an illegal reporting period (PERIOD = 0).
+- 子站新增 `Cfg2Rejected { reason }` 事件,前端事件区以错误样式展示拒绝原因 / New substation `Cfg2Rejected { reason }` event; the frontend event log renders the rejection reason in an error style.
+- 端到端测试新增 `v3_master_pushes_period_zero_gets_nacked`,覆盖主站推送 PERIOD=0 → 子站 NACK 的完整链路 / Added the end-to-end test `v3_master_pushes_period_zero_gets_nacked` covering the full master-pushes-PERIOD-0 → substation-NACK path.
+
+### Changed 改进
+
+- 子站收到下传 CFG-2 时先校验上送周期再决定接受/拒绝,而非无条件接受 / On an incoming CFG-2 the substation validates the reporting period before accepting, rather than accepting unconditionally.
+
+### Fixed 修复
+
+- 主站在没有 ack waiter 时收到 NACK 不再静默丢弃,改为 emit Error 上抛 UI,避免拒绝结果"消失" / On the master, a NACK arriving with no ack waiter is no longer silently dropped — it now emits an Error to the UI so the rejection isn't lost.
+- 异常注入的原始 PERIOD 增加 u16 上界校验(>65535 会回绕成 0),非法取值直接提示而不误发 / The raw-PERIOD field is now bounds-checked against u16 (values >65535 would wrap to 0); an illegal value is flagged instead of being sent by mistake.
+
 ## [0.5.0] - 2026-06-01
 
 ### Highlights / 亮点
