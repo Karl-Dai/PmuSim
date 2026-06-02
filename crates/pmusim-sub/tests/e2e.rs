@@ -226,6 +226,12 @@ async fn v3_master_pushes_period_zero_gets_nacked() {
     // 保持原状：子站继续推数据（注入后仍能收到 DataFrameSent）。
     let _ = wait_sub_event(&mut sub_rx, |e| matches!(e, SubEvent::DataFrameSent { .. })).await;
 
+    // 主站这端（fire-and-forget 路径无 ack waiter）也必须看见该 NACK。
+    let err = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::Error { .. })).await;
+    if let PmuEvent::Error { error, .. } = err {
+        assert!(error.contains("NACK"), "主站应 surface NACK 错误: {error}");
+    }
+
     master.stop().await;
     sub.stop().await;
 }

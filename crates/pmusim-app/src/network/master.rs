@@ -1114,8 +1114,23 @@ impl MasterStation {
                         let mut sessions_w = sessions.write().await;
                         sessions_w.get_mut(idcode).and_then(|s| s.pending_ack.take())
                     };
-                    if let Some(tx) = tx {
-                        let _ = tx.send(cmd.cmd);
+                    match tx {
+                        Some(tx) => {
+                            let _ = tx.send(cmd.cmd);
+                        }
+                        // fire-and-forget 路径（实时改速率 / 异常注入）没有装
+                        // ack waiter；若不在此 surface，子站的 NACK 会被静默
+                        // 丢弃，UI 永远看不到「配置被拒」。
+                        None if cmd.cmd == Cmd::Nack as u16 => {
+                            emit_event(
+                                event_tx,
+                                PmuEvent::Error {
+                                    idcode: idcode.to_string(),
+                                    error: "子站 NACK：CFG-2 配置被拒".into(),
+                                },
+                            );
+                        }
+                        None => {} // 无 waiter 的 ACK：正常，忽略
                     }
                 }
             }
