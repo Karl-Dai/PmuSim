@@ -312,7 +312,7 @@ watch(rateHz, debounced<string>(250, async (v) => {
       </div>
       <div class="row" v-if="injectAbnormal">
         <label>{{ t("config.skipCfg2") }}</label>
-        <button class="btn" @click="skipCfg2Connect" :disabled="busy || running">{{ t("config.skipCfg2Connect") }}</button>
+        <button class="btn" @click="skipCfg2Connect" :disabled="busy">{{ t("config.skipCfg2Connect") }}</button>
       </div>
       <div class="row">
         <label>{{ t("config.heartbeat") }}</label>

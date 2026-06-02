@@ -284,12 +284,11 @@ async fn v3_master_skips_cfg2_streams_via_cfg1() {
 
     // 凭 CFG-1 维度成功解出 DataFrame。
     let data = wait_master_event(&mut m_rx, |e| matches!(e, PmuEvent::DataFrame { .. })).await;
-    if let PmuEvent::DataFrame { idcode, data } = data {
-        assert_eq!(idcode, IDCODE);
-        assert_eq!(data.phasors.len(), 1);
-        assert_eq!(data.analog.len(), 2);
-        assert_eq!(data.digital, vec![0x000A]);
-    }
+    let PmuEvent::DataFrame { idcode, data } = data else { unreachable!() };
+    assert_eq!(idcode, IDCODE);
+    assert_eq!(data.phasors.len(), 1);
+    assert_eq!(data.analog.len(), 2);
+    assert_eq!(data.digital, vec![0x000A]);
 
     master.stop().await;
     sub.stop().await;
