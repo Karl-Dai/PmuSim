@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-02
+
+### Highlights / 亮点
+
+- 🧪 受控注入 V4:主站可「跳过 CFG-2」仅凭 CFG-1 直接开流,演示规约层面 CFG-2 并非开流的硬前置 / Controlled injection (V4): the master can **skip CFG-2** and start streaming using only CFG-1 — showing CFG-2 is not a hard prerequisite for data flow at the protocol level.
+- 🛰️ 印证「子站无 CFG-2 也推流、主站凭 CFG-1 即可解码」:子站收到 OpenData 即推流(本无 CFG 门控),主站用 CFG-1 的维度成功解出相量/模拟量/数字量 / Demonstrates "substation streams without CFG-2, master decodes via CFG-1": the substation streams the moment it gets OpenData (no CFG gate), and the master decodes phasors/analogs/digitals from CFG-1 dimensions.
+- 🖱️ 主站「异常注入」区新增「连接(跳过 CFG-2)」入口,作为正常「连接」之外的另一启动方式;事件区标注「跳过 CFG-2,仅凭 CFG-1 开流」 / New "Connect, skip CFG-2" entry in the master's injection area as an alternative to the normal connect; the event log marks "skipped CFG-2, streaming via CFG-1 only".
+
+### Added 新增
+
+- 主站新增 `skip_cfg2_open` 命令与握手 `do_skip_cfg2_open`:召唤 CFG-1 → 跳过下传/召唤 CFG-2 → 直接 OpenData(走内部路径,天然绕过手动 OpenData 的握手门控,不改门控、不加状态) / Master gains the `skip_cfg2_open` command and `do_skip_cfg2_open` handshake: request CFG-1 → skip all CFG-2 → OpenData directly (via the internal path, naturally bypassing the manual-OpenData gate; gate and session states unchanged).
+- 新事件 `Cfg2Skipped`(后端 + 前端 types/事件展示/中英 i18n)作为跳过 CFG-2 的可见注入标记 / New `Cfg2Skipped` event (backend + frontend types / event-log display / 中英 i18n) as a visible injection marker for the skip.
+- 集成测试 `v3_master_skips_cfg2_streams_via_cfg1`:断言全程无 CFG-2 交换、有 `Cfg2Skipped`,且凭 CFG-1 维度解出 `DataFrame` / Integration test `v3_master_skips_cfg2_streams_via_cfg1`: asserts no CFG-2 exchange occurs, `Cfg2Skipped` is emitted, and a `DataFrame` is decoded from CFG-1 dimensions.
+
 ## [0.6.0] - 2026-06-02
 
 ### Highlights / 亮点

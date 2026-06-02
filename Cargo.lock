@@ -2603,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "pmusim-app"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "log",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "pmusim-sub"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "hex",
  "log",
