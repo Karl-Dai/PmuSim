@@ -10,6 +10,8 @@ import { useFrameRate } from "../composables/useFrameRate";
 import { useToast, toastError } from "../composables/useToast";
 import { listenerReady } from "../composables/usePmuEvents";
 import { useI18n } from "../i18n";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { hzToPeriod } from "../lib/rate";
 
 const { t } = useI18n();
 const { protocol } = useProtocol();
@@ -162,13 +164,10 @@ async function startEverything() {
       const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
       await invoke("connect_substation", { host: connIp.value.trim(), port: mgmt, dataPort: data });
     }
-    // 4. auto handshake with the chosen PERIOD (PERIOD value = (cycles*100); Hz→cycles = 50/Hz)
+    // 4. auto handshake with the chosen PERIOD。hzToPeriod(0)=0 → 0Hz 选中时握手即带
+    // 非法 PERIOD=0（选中时已弹确认，此处不再二次确认）。
     const hz = parseFloat(rateHz.value);
-    let periodVal: number | null = null;
-    if (Number.isFinite(hz) && hz > 0) {
-      // period_ms = 1000/Hz; cycles = period_ms * 50/1000 = period_ms/20; PERIOD = cycles*100
-      periodVal = Math.round((1000 / hz) * 100 / 20);
-    }
+    const periodVal: number | null = Number.isFinite(hz) ? hzToPeriod(hz) : null;
     // We don't yet know the real idcode; auto_handshake resolves it from
     // peer (host:port) so the placeholder works.
     const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
@@ -254,13 +253,14 @@ watch(heartbeatSecs, debounced<string>(250, async (v) => {
 // Rate live update — push fresh CFG-2 to substation. Only valid once
 // CFG-1 has been received (cfg2_sent / streaming); before then the
 // initial auto_handshake will carry the chosen rate.
-watch(rateHz, debounced<string>(250, async (v) => {
+// 正常档位(25/50/100/200)实时下发 CFG-2 —— 防抖路径，行为不变。
+const applyNormalRate = debounced<string>(250, async (v) => {
   const s = session.value;
   if (!s) return;
   if (s.state !== "streaming" && s.state !== "cfg2_sent") return;
   const hz = parseFloat(v);
   if (!Number.isFinite(hz) || hz <= 0) return;
-  const periodVal = Math.round((1000 / hz) * 100 / 20);
+  const periodVal = hzToPeriod(hz);
   try {
     await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2_cmd", period: null });
     await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2", period: periodVal });
@@ -268,7 +268,38 @@ watch(rateHz, debounced<string>(250, async (v) => {
   } catch (e) {
     pushToast(t("config.rateFailed", { error: toastError(e) }), "error");
   }
-}));
+});
+
+// 选中「0 Hz (异常场景)」即弹原生确认框:取消→回退上一档(suppress 跳过回退引发的自触发,
+// 避免误发上一档 CFG-2);确认→在线则立即注入 PERIOD=0,未连接则仅保留选中由启动带下去。
+// 确认早于连接状态护栏 → 无论连接与否,选中 0Hz 都恰好确认一次。
+let suppressRateWatch = false;
+watch(rateHz, async (v, old) => {
+  if (suppressRateWatch) { suppressRateWatch = false; return; }
+  if (v === "0") {
+    const ok = await ask(t("config.inject0Confirm"), {
+      title: t("config.inject0Title"),
+      kind: "warning",
+    });
+    if (!ok) {
+      suppressRateWatch = true;
+      rateHz.value = old;
+      return;
+    }
+    const s = session.value;
+    if (s && (s.state === "streaming" || s.state === "cfg2_sent")) {
+      try {
+        await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2_cmd", period: null });
+        await invoke("send_command", { idcode: s.idcode, cmd: "send_cfg2", period: 0 });
+        pushToast(t("config.injectSent", { period: "0" }), "info");
+      } catch (e) {
+        pushToast(t("config.injectFailed", { error: toastError(e) }), "error");
+      }
+    }
+    return;
+  }
+  applyNormalRate(v);
+});
 </script>
 
 <template>
@@ -291,6 +322,7 @@ watch(rateHz, debounced<string>(250, async (v) => {
             <option value="50">50 Hz</option>
             <option value="100">100 Hz</option>
             <option value="200">200 Hz</option>
+            <option value="0">0 Hz ({{ t('config.rateAbnormalTag') }})</option>
           </select>
           <span class="readback">{{ ratePeriodReadback ? `(${ratePeriodReadback})` : "" }}</span>
         </div>
