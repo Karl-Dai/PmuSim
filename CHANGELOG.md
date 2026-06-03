@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-03
+
+### Highlights / 亮点
+
+- 🎛️ 主站速率下拉新增「0 Hz (异常场景)」一键档位:选中即注入非法上送周期 PERIOD=0(子站应 NACK),先弹原生确认框、取消自动回退,把最常用的异常场景从「勾选+手填」降为一次点选 / New "0 Hz (abnormal)" entry in the master's rate dropdown: picking it injects an illegal reporting period PERIOD=0 (the substation should NACK), guarded by a native confirm dialog with auto-revert on cancel — turning the most common abnormal case from "check a box + type a value" into a single pick.
+- 🐛 修复 V2 双 IDCODE 子站握手中途丢会话致永不开流:真实网关 CFG-1 报站名标签、命令帧报真实通信 IDCODE,主站对两者都重命名会话致握手第 3 步找不到会话而中止;现每步按对端地址重解析,真机验证稳定开流 / Fixed a V2 dual-IDCODE substation losing its session mid-handshake and never streaming: a real gateway reports a name label in CFG-1 but its true comms IDCODE in command frames; the master re-keyed on both and the handshake aborted at step 3. The session is now re-resolved by peer address at every step — verified streaming stably on real hardware.
+- 🧪 新增 0Hz 无头组件测试(vitest + happy-dom)4 场景 + V2 双 IDCODE 握手回归测试 / Added a 4-scenario headless component test for the 0 Hz flow (vitest + happy-dom) plus a V2 dual-IDCODE handshake regression test.
+
+### Added 新增
+
+- 主站速率下拉新增 `0 Hz (异常场景)` 档位,作为注入 PERIOD=0 的一键快捷入口:streaming 时选中并确认即实时下发 CFG-2(PERIOD=0),未连接时由后续「连接/启动」握手带下去;取消则回退上一档且不下发(`suppressRateWatch` 防回退误发);现有「异常注入」勾选区保留不动,后端零改动(复用既有 `send_cfg2` + 子站 NACK 链路)/ New `0 Hz (abnormal)` entry in the master rate dropdown as a one-click PERIOD=0 injector: while streaming, confirming it pushes a CFG-2 (PERIOD=0) live; while disconnected it's carried into the next connect/start handshake; cancelling reverts to the prior rate with no send (`suppressRateWatch` guards a stray resend). The existing "abnormal injection" area is untouched and the backend is unchanged (reuses the existing `send_cfg2` + substation-NACK path).
+- 抽出纯函数 `frontend/src/lib/rate.ts` 的 `hzToPeriod`(0Hz 特判为 PERIOD=0,绕开 1000/hz 除零)+ 单测;新增 i18n 文案(`rateAbnormalTag`/`inject0Title`/`inject0Confirm`)与 `@tauri-apps/plugin-dialog` 依赖 / Extracted a pure `hzToPeriod` helper in `frontend/src/lib/rate.ts` (0 Hz special-cased to PERIOD=0, avoiding the 1000/hz division) with a unit test; added i18n strings (`rateAbnormalTag`/`inject0Title`/`inject0Confirm`) and the `@tauri-apps/plugin-dialog` dependency.
+- 主站 `resolve_peer_idcode`:握手步骤 2~5 与跳过-CFG-2 的 OpenData 前,均按 `(peer_host, peer_port)` 重解析当前会话 IDCODE,扛任意次中途重命名;无头复现工具 `crates/pmusim-app/examples/v2_master_repro.rs` / Master `resolve_peer_idcode`: re-resolves the current session IDCODE by `(peer_host, peer_port)` before handshake steps 2–5 and the skip-CFG-2 OpenData, tolerating any number of mid-flight re-keys; plus a headless repro tool `crates/pmusim-app/examples/v2_master_repro.rs`.
+
+### Fixed 修复
+
+- V2 双 IDCODE 子站(CFG-1 报站名标签 `pmuTag`、命令帧报通信 IDCODE `q1234567`)握手中途被二次重命名,致 `install_ack_waiter` 找不到会话、报「CFG-2 帧: session 已消失」而中止、永不发 OpenData(连上无数据);修复后握手每步重解析会话,且 `mgmt_read_loop` 仅允许 config 帧给占位会话定身份、不覆盖命令帧已确立的真实 IDCODE,消除 label↔comms-id 横跳 / A V2 dual-IDCODE substation (name label `pmuTag` in CFG-1, comms IDCODE `q1234567` in command frames) was re-keyed twice mid-handshake, so `install_ack_waiter` lost the session, aborted with "CFG-2 frame: session gone", and never sent OpenData (connected but no data). The handshake now re-resolves the session at every step, and `mgmt_read_loop` only lets a config frame name a placeholder session (never overriding the real IDCODE established by a command frame) — eliminating the label↔comms-id flapping.
+
+### Tests 测试
+
+- 新增 `frontend/tests/config-info-panel.0hz.test.ts`(vitest + happy-dom + @vue/test-utils):真实挂载 `ConfigInfoPanel.vue`、mock `invoke`/`ask`,驱动速率下拉验证 0Hz watcher 四条路径(确认下发 PERIOD=0 / 取消回退不下发 / 未连接保持选中 / 正常档位防抖下发),4/4 通过 / Added `frontend/tests/config-info-panel.0hz.test.ts` (vitest + happy-dom + @vue/test-utils): mounts `ConfigInfoPanel.vue`, mocks `invoke`/`ask`, and drives the rate dropdown to verify the four 0 Hz watcher paths (confirm → PERIOD=0 sent / cancel → revert with no send / disconnected → stays selected / normal rate → debounced send) — 4/4 passing.
+- 新增 V2 双 IDCODE 握手回归测试 `v2_dual_idcode_handshake_reaches_streaming`(修复前红、修复后绿)/ Added the V2 dual-IDCODE handshake regression test `v2_dual_idcode_handshake_reaches_streaming` (red before the fix, green after).
+
 ## [0.7.0] - 2026-06-02
 
 ### Highlights / 亮点
