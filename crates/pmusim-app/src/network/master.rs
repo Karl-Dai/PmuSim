@@ -982,7 +982,23 @@ impl MasterStation {
                     Frame::Data(d) => Some(d.idcode.clone()),
                 };
                 if let Some(real_id) = real_id {
-                    if !real_id.is_empty() && real_id != current_id {
+                    // A Config frame may only *establish* identity for a
+                    // still-pending placeholder ("host:port") session — never
+                    // *override* an IDCODE already learned from a command
+                    // frame. For V2 the config IDCODE is a synthesised
+                    // pmu_idcode *label* (e.g. "pmuTag") that can disagree with
+                    // the comms IDCODE the substation uses in its command
+                    // frames (e.g. "q1234567"); without this guard a CFG-2
+                    // refresh would re-key an established session back to the
+                    // label, and the next heartbeat would flip it again —
+                    // endless label↔comms-id churn. Command frames carry the
+                    // authoritative comms IDCODE and may always re-key.
+                    let is_config = matches!(frame, Frame::Config(_));
+                    let current_is_placeholder = current_id.contains(':');
+                    if !real_id.is_empty()
+                        && real_id != current_id
+                        && (!is_config || current_is_placeholder)
+                    {
                         let old_id = current_id.clone();
                         let peer_ip_for_event;
                         let displaced_real_id;
@@ -1560,7 +1576,12 @@ impl MasterStation {
             }
         };
 
-        // Step 2: 下传 CFG-2 命令 → expect ACK (V3 §8.4).
+        // Step 2: 下传 CFG-2 命令 → expect ACK (V3 §8.4). Re-resolve the
+        // current id by peer first: the substation's first command-frame
+        // reply (the ACK below) may carry a different IDCODE than CFG-1 did,
+        // re-keying the session — so every step from here re-resolves rather
+        // than reusing a cached `current`.
+        let current = resolve_peer_idcode(sessions, &peer_host, peer_port, &current).await;
         if !Self::do_send_cmd_await_ack(
             sessions, event_tx, &current, Cmd::SendCfg2Cmd as u16, "SendCfg2Cmd",
         )
@@ -1570,6 +1591,7 @@ impl MasterStation {
         }
 
         // Step 3: 下传 CFG-2 配置帧 → expect ACK (V3 §8.6).
+        let current = resolve_peer_idcode(sessions, &peer_host, peer_port, &current).await;
         let Some(rx3) = Self::install_ack_waiter(sessions, &current).await else {
             emit_event(event_tx, PmuEvent::Error {
                 idcode: current.clone(),
@@ -1584,6 +1606,7 @@ impl MasterStation {
 
         // Step 4: 召唤 CFG-2 → substation re-uploads CFG-2 frame (not ACK).
         // No ACK to wait on here; the Cfg2Received event signals completion.
+        let current = resolve_peer_idcode(sessions, &peer_host, peer_port, &current).await;
         Self::do_send_cmd(sessions, event_tx, &current, Cmd::SendCfg2 as u16).await;
         // Brief settle — wait_for_cfg2 here would be cleaner but we don't
         // currently track it; 500ms is enough for a healthy LAN substation.
@@ -1594,6 +1617,7 @@ impl MasterStation {
         // so the pipe needs to exist first or initial frames are lost. If the
         // V3 data pipe fails (timeout/refused), skip OpenData — do_open_data_v3
         // already emitted an Error event and StreamingStarted would lie.
+        let current = resolve_peer_idcode(sessions, &peer_host, peer_port, &current).await;
         if !Self::do_open_data_v3(sessions, cmd_tx, event_tx, &current).await {
             return;
         }
@@ -1665,6 +1689,8 @@ impl MasterStation {
         emit_event(event_tx, PmuEvent::Cfg2Skipped { idcode: current.clone() });
 
         // 开数据管道(V3) + OpenData(CFG-2 三步已故意跳过)。管道打开失败则不发 OpenData、不谎报 streaming。
+        // 与 do_auto_handshake 一致:OpenData 前按 peer 重解析,扛住中途重命名(V2 双 IDCODE 子站)。
+        let current = resolve_peer_idcode(sessions, &peer_host, peer_port, &current).await;
         if !Self::do_open_data_v3(sessions, cmd_tx, event_tx, &current).await {
             return;
         }
@@ -1683,6 +1709,30 @@ impl MasterStation {
 // =============================================================================
 // Free helpers
 // =============================================================================
+
+/// Resolve the live session id currently matching `(host, port)`. A session
+/// can be re-keyed mid-handshake (placeholder → real IDCODE, or — for a V2
+/// substation whose CFG-1 label differs from its command-frame IDCODE — from
+/// one IDCODE to another on the first ACK/heartbeat). Handshake steps must
+/// re-resolve through this before each command instead of caching the id once,
+/// or they send to / wait on a key that no longer exists ("session 已消失").
+/// Falls back to `fallback` if no live session matches the peer anymore.
+async fn resolve_peer_idcode(
+    sessions: &Arc<RwLock<HashMap<String, SubStationSession>>>,
+    peer_host: &str,
+    peer_port: u16,
+    fallback: &str,
+) -> String {
+    let r = sessions.read().await;
+    r.iter()
+        .find(|(_, s)| {
+            s.peer_host == peer_host
+                && s.peer_mgmt_port == peer_port
+                && s.state != SessionState::Disconnected
+        })
+        .map(|(id, _)| id.clone())
+        .unwrap_or_else(|| fallback.to_string())
+}
 
 /// Poll `sessions` for a session whose peer matches `(host, port)` and that
 /// has received a CFG-1. Returns the session's current idcode (may differ
