@@ -573,3 +573,139 @@ async fn v2_start_still_binds_local_data_port() {
     assert!(master.data_port != 0, "V2 master must bind a real local data listener");
     master.stop().await;
 }
+
+// --- V2 dual-IDCODE substation regression --------------------------------
+//
+// A field substation (10.15.48.182) reports pmu_idcode="pmuTag" inside its
+// CFG-1 block (a station-name label), but uses a DIFFERENT comms IDCODE
+// "q1234567" in every command frame (ACK / heartbeat). V2 config headers
+// carry no top-level IDCODE, so the parser synthesises config.idcode from
+// the block's pmu_idcode. The master used to re-key the session on BOTH —
+// placeholder → "pmuTag" (from CFG-1) → "q1234567" (from the first ACK) —
+// and do_auto_handshake, which captured the post-CFG-1 idcode once, lost
+// the session at the second re-key and aborted with "session 已消失"
+// before CFG-2 / OpenData. The handshake must instead reach Streaming.
+
+const V2_STN: &str = "pmuName";
+const V2_CFG_IDCODE: &str = "pmuTag"; // label inside CFG-1 block
+const V2_COMMS_IDCODE: &str = "q1234567"; // real IDCODE in command frames
+
+fn make_v2_cfg(cfg_type: u8) -> ConfigFrame {
+    let annmr = 2u16;
+    let dgnmr = 1u16;
+    let mut channel_names: Vec<String> = (0..annmr).map(|i| format!("AN{i}")).collect();
+    for i in 0..(dgnmr * 16) {
+        channel_names.push(format!("D{i:02}"));
+    }
+    ConfigFrame {
+        version: ProtocolVersion::V2,
+        cfg_type,
+        idcode: String::new(), // V2 config header carries no IDCODE
+        soc: 0x67B2C719,
+        fracsec: 0,
+        d_frame: 0,
+        meas_rate: 1_000_000,
+        num_pmu: 1,
+        stn: V2_STN.into(),
+        pmu_idcode: V2_CFG_IDCODE.into(), // != comms IDCODE on purpose
+        format_flags: 0,
+        phnmr: 0,
+        annmr,
+        dgnmr,
+        channel_names,
+        phunit: vec![],
+        anunit: vec![100, 200],
+        digunit: vec![(0x0001, 0x0000)],
+        fnom: 0x0001,
+        period: 100,
+        pmu_blocks: vec![],
+    }
+}
+
+fn v2_cmd(cmd: u16) -> Vec<u8> {
+    build_command(&CommandFrame {
+        version: ProtocolVersion::V2,
+        idcode: V2_COMMS_IDCODE.into(),
+        soc: 0,
+        fracsec: 0,
+        cmd,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn v2_dual_idcode_handshake_reaches_streaming() {
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PmuEvent>();
+    // 30s heartbeat so it doesn't perturb the handshake mid-test.
+    let mut master = MasterStation::new(event_tx, 0, 30.0, ProtocolVersion::V2);
+    master.start().await.unwrap();
+
+    let mgmt_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mgmt_port = mgmt_listener.local_addr().unwrap().port();
+
+    let mock_task = tokio::spawn(async move {
+        let (stream, _) = mgmt_listener.accept().await.unwrap();
+        let (mut reader, mut writer) = stream.into_split();
+        loop {
+            let frame_data = match read_one_frame(&mut reader).await {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+            match parse(&frame_data, 0, 0, 0, 0) {
+                Ok(Frame::Command(cmd)) => match cmd.cmd {
+                    c if c == Cmd::SendCfg1 as u16 => {
+                        // CFG-1 carries pmu_idcode="pmuTag".
+                        writer.write_all(&build_config(&make_v2_cfg(FrameType::Cfg1 as u8)).unwrap()).await.unwrap();
+                    }
+                    c if c == Cmd::SendCfg2Cmd as u16 => {
+                        // ACK uses the REAL comms IDCODE "q1234567" → re-key #2.
+                        writer.write_all(&v2_cmd(Cmd::Ack as u16)).await.unwrap();
+                    }
+                    c if c == Cmd::SendCfg2 as u16 => {
+                        writer.write_all(&build_config(&make_v2_cfg(FrameType::Cfg2 as u8)).unwrap()).await.unwrap();
+                    }
+                    c if c == Cmd::Heartbeat as u16 => {
+                        writer.write_all(&v2_cmd(Cmd::Heartbeat as u16)).await.unwrap();
+                    }
+                    // OpenData: a real V2 substation dials the master's data
+                    // listener; the mock doesn't, but StreamingStarted still
+                    // fires master-side for V2, which is what we assert.
+                    _ => {}
+                },
+                // Master's CFG-2 download (a Config frame) → ACK with comms IDCODE.
+                Ok(Frame::Config(_)) => {
+                    writer.write_all(&v2_cmd(Cmd::Ack as u16)).await.unwrap();
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let placeholder = format!("127.0.0.1:{mgmt_port}");
+    master
+        .connect_to_substation("127.0.0.1".into(), mgmt_port, 0, ProtocolVersion::V2)
+        .await
+        .unwrap();
+    master.auto_handshake(placeholder, None).await.unwrap();
+
+    // Either we reach StreamingStarted (fixed) or the handshake aborts with
+    // "session 已消失" (the bug). Whichever lands first decides the test.
+    let ev = wait_event(&mut event_rx, |e| {
+        matches!(e, PmuEvent::StreamingStarted { .. })
+            || matches!(e, PmuEvent::Error { error, .. } if error.contains("session 已消失"))
+    })
+    .await;
+    match ev {
+        PmuEvent::StreamingStarted { idcode } => {
+            // Final identity must be the comms IDCODE, not the CFG label.
+            assert_eq!(idcode, V2_COMMS_IDCODE, "streaming session keyed on wrong IDCODE");
+        }
+        PmuEvent::Error { error, .. } => {
+            panic!("handshake aborted instead of streaming: {error}");
+        }
+        _ => unreachable!(),
+    }
+
+    master.stop().await;
+    mock_task.abort();
+}
