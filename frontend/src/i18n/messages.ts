@@ -43,6 +43,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.injectSent': '已注入 PERIOD={period}',
     'config.injectFailed': '注入失败: {error}',
     'config.injectBadValue': 'PERIOD 取值非法',
+    'config.rateAbnormalTag': '异常场景',
+    'config.inject0Title': '异常注入确认',
+    'config.inject0Confirm': '确认向子站注入非法上送周期 PERIOD=0？合规子站应以 NACK 拒绝。',
     'config.skipCfg2': '跳过 CFG-2',
     'config.skipCfg2Connect': '连接(跳过 CFG-2)',
     // Session state
@@ -145,6 +148,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     'config.injectSent': 'Injected PERIOD={period}',
     'config.injectFailed': 'Injection failed: {error}',
     'config.injectBadValue': 'Invalid PERIOD value',
+    'config.rateAbnormalTag': 'Abnormal',
+    'config.inject0Title': 'Confirm abnormal injection',
+    'config.inject0Confirm': 'Inject illegal reporting period PERIOD=0 to the substation? A compliant substation should reject with NACK.',
     'config.skipCfg2': 'Skip CFG-2',
     'config.skipCfg2Connect': 'Connect, skip CFG-2',
     // Session state
