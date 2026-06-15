@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-15
+
+### Highlights / 亮点
+
+- 📊 「上传速率」改为按数据帧 SOC/FRACSEC 报文时间戳反推,而非浏览器墙钟到达时间:消除 webview 事件循环抖动与网络挤帧导致的虚高(100Hz 流不再显示 102),读数反映子站给帧打的真实时标速率 / The master's "upload rate" is now derived from each data frame's own SOC/FRACSEC timestamp instead of browser wall-clock arrival time, eliminating the inflation from webview event-loop jitter and network bunching (a 100 Hz stream no longer reads 102) — the figure reflects the rate the substation actually time-stamped its frames at.
+- 🛡️ 报文时间倒退(子站重启 / GPS 校时 / SOC 回绕)自动重置滑窗,避免旧时间戳全落入新窗造成的瞬时虚高 / A backward jump in the frame timestamp (substation restart / GPS resync / SOC wrap) now resets the sliding window, preventing the transient spike stale timestamps would otherwise cause.
+- 🧪 新增 7 例 vitest 覆盖报文时间换算与帧率滑窗 / Added 7 vitest cases covering the timestamp-to-ms conversion and the frame-rate sliding window.
+
+### Added 新增
+
+- `frontend/src/lib/rate.ts` 新增纯函数 `frameTimeMs(soc, fracsec, measRate)`:按 V3 §8.11 将 SOC/FRACSEC 换算为绝对毫秒,屏蔽 FRACSEC 高 8 位时标质量码,`measRate<=0` 退化整秒防除零 / New pure helper `frameTimeMs(soc, fracsec, measRate)` in `frontend/src/lib/rate.ts`: converts SOC/FRACSEC to absolute milliseconds per V3 §8.11, masking the high 8 FRACSEC bits (time-quality) and degrading to whole seconds when `measRate<=0` to avoid divide-by-zero.
+
+### Changed 改进
+
+- `useFrameRate.tick` 改为接收数据帧报文时间(ms)而非内部读 `performance.now()`;`usePmuEvents` 在 `DataFrame` 分支用 `frameTimeMs(soc, fracsec, measRate)` 计算时标并传入,`measRate` 取该 IDCODE 的 CFG `TIME_BASE`(缺省 1e6);滑窗逻辑增加报文时间倒退检测 → 重置,停流/断链归零路径不变 / `useFrameRate.tick` now takes the frame's timestamp (ms) instead of reading `performance.now()` itself; `usePmuEvents` computes it via `frameTimeMs(soc, fracsec, measRate)` in the `DataFrame` branch (`measRate` from that IDCODE's CFG `TIME_BASE`, default 1e6); the sliding window adds backward-timestamp detection → reset, while the stop/disconnect zeroing paths are unchanged.
+- `ConfigInfoPanel` 最新时间戳显示复用同一 `frameTimeMs`,消除与帧率换算两份 fracsec→ms 逻辑漂移的风险 / `ConfigInfoPanel`'s latest-timestamp display now reuses the same `frameTimeMs`, removing the risk of the two fracsec→ms conversions drifting apart.
+
+### Tests 测试
+
+- 新增 `frontend/tests/use-frame-rate.test.ts`(vitest)7 场景(换算 / 高位屏蔽 / 除零 / 滑窗 / 旧帧剔除 / 倒退重置 / 清零),TDD 先红后绿;`vue-tsc` 类型检查通过,全量前端测试 11/11 通过 / Added `frontend/tests/use-frame-rate.test.ts` (vitest), 7 scenarios (conversion / high-bit masking / divide-by-zero / window / eviction / backward-reset / clear), written test-first (red→green); `vue-tsc` passes and the full frontend suite is 11/11 green.
+
 ## [0.8.0] - 2026-06-03
 
 ### Highlights / 亮点

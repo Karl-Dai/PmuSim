@@ -11,7 +11,7 @@ import { useToast, toastError } from "../composables/useToast";
 import { listenerReady } from "../composables/usePmuEvents";
 import { useI18n } from "../i18n";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { hzToPeriod } from "../lib/rate";
+import { hzToPeriod, frameTimeMs } from "../lib/rate";
 
 const { t } = useI18n();
 const { protocol } = useProtocol();
@@ -118,9 +118,7 @@ const latestTime = computed(() => {
   const d = latestData.value?.data;
   if (!d) return "—";
   const measRate = cfg.value?.measRate ?? 1_000_000;
-  const fracsecCount = d.fracsec & 0xFFFFFF;
-  const msOffset = measRate > 0 ? fracsecCount / (measRate / 1000) : 0;
-  const ms = d.soc * 1000 + msOffset;
+  const ms = frameTimeMs(d.soc, d.fracsec, measRate);
   const date = new Date(ms);
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds()).padStart(3, "0")}`;

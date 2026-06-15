@@ -5,6 +5,7 @@ import { useCommLog } from "./useCommLog";
 import { useToast } from "./useToast";
 import { useEventLog } from "./useEventLog";
 import { useFrameRate } from "./useFrameRate";
+import { frameTimeMs } from "../lib/rate";
 import { t } from "../i18n";
 
 // We poll `poll_events` instead of using Tauri's listen()/emit() pair.
@@ -25,7 +26,7 @@ export const listenerReady: Promise<void> = new Promise((res) => {
 });
 
 export function usePmuEvents() {
-  const { addSession, updateState, removeSession, setConfig } = useSessions();
+  const { addSession, updateState, removeSession, setConfig, configs } = useSessions();
   const { addData } = useCommLog();
   const { push: pushToast } = useToast();
   const { push: pushEvent } = useEventLog();
@@ -70,10 +71,14 @@ export function usePmuEvents() {
         pushEvent(t("event.dataPaused"));
         resetFrameRate();
         break;
-      case "DataFrame":
+      case "DataFrame": {
         addData(payload.idcode, payload.data);
-        tickFrameRate();
+        // 用数据帧自带的 SOC/FRACSEC(报文时间)反推帧率，而非墙钟到达时间。
+        // measRate 取该 idcode 的 CFG TIME_BASE，缺省 1e6。
+        const measRate = configs.get(payload.idcode)?.measRate ?? 1_000_000;
+        tickFrameRate(frameTimeMs(payload.data.soc, payload.data.fracsec, measRate));
         break;
+      }
       case "RawFrame":
         // The new UI does not render the raw-frame stream (a future hex
         // viewer can re-attach to useCommLog). Until then, silently drop
