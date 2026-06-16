@@ -316,6 +316,7 @@ watch(rateHz, async (v, old) => {
         <label>{{ t("config.rate") }}</label>
         <div class="ctl-with-suffix">
           <select v-model="rateHz">
+            <option value="10">10 Hz</option>
             <option value="25">25 Hz</option>
             <option value="50">50 Hz</option>
             <option value="100">100 Hz</option>
