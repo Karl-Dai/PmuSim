@@ -222,6 +222,10 @@ xattr -dr com.apple.quarantine "/Applications/PmuSim.app"
 
 </details>
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history, or the [Releases](https://github.com/Karl-Dai/PmuSim/releases) page for downloads.
+
 ## Acknowledgments
 
 Built on [Tauri 2](https://tauri.app/), [Vue 3](https://vuejs.org/), [tokio](https://tokio.rs/), [`encoding_rs`](https://github.com/hsivonen/encoding_rs), and `tauri-plugin-updater`. Protocol behavior follows the GB/T 26865.2-2011 (V3) and Q/GDW 131-2006 (V2) specifications.

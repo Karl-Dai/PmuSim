@@ -222,6 +222,10 @@ xattr -dr com.apple.quarantine "/Applications/PmuSim.app"
 
 </details>
 
+## 更新日志
+
+完整版本历史见 [CHANGELOG.md](CHANGELOG.md),安装包下载见 [Releases](https://github.com/Karl-Dai/PmuSim/releases) 页面。
+
 ## 致谢
 
 基于 [Tauri 2](https://tauri.app/)、[Vue 3](https://vuejs.org/)、[tokio](https://tokio.rs/)、[`encoding_rs`](https://github.com/hsivonen/encoding_rs) 与 `tauri-plugin-updater` 构建。协议行为遵循 GB/T 26865.2-2011 (V3) 与 Q/GDW 131-2006 (V2) 规约。

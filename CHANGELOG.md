@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-16
+
+### Highlights / 亮点
+
+- 🎛️ 主站速率下拉新增「10 Hz」合法档位:补齐 IEEE C37.118 对 50Hz 系统的标准上送率,从此下拉不再从 25Hz 直接跳到 200Hz,常用的低速率一键可选 / New "10 Hz" legal entry in the master's rate dropdown: it fills in the standard IEEE C37.118 reporting rate for 50 Hz systems, so the dropdown no longer jumps straight from 25 Hz to 200 Hz — the common low rate is now one pick away.
+- ⚙️ 与 25/50/100/200 同等走正常路径:选中即下发 CFG-2(PERIOD=500),无确认框、无「异常」标签,readback 回显 `(10.0Hz)`;后端/watch/readback/i18n/默认档位零改动,纯靠既有链路 / It flows through the normal path exactly like 25/50/100/200: picking it pushes a CFG-2 (PERIOD=500) with no confirm dialog and no "abnormal" tag, and the readback shows `(10.0Hz)`. Backend, watcher, readback, i18n and the default rate are all unchanged — it rides the existing path.
+- 🧪 新增对称无头组件回归测试,全量前端测试 12/12 通过 / Added a symmetric headless component regression test; the full frontend suite is 12/12 green.
+
+### Added 新增
+
+- 主站速率下拉新增 `10 Hz` 合法档位,置于最前(顺序 `10 / 25 / 50 / 100 / 200 / 0(异常)`),映射 CFG-2 `PERIOD=500`(`hzToPeriod(10)=round(5000/10)=500`)。10Hz 落入既有正常档位的 `applyNormalRate` 防抖路径:streaming 时实时下发 CFG-2,未连接时由后续握手带下去,不触发 0Hz 的异常确认框 / New `10 Hz` legal entry in the master rate dropdown, placed first (order `10 / 25 / 50 / 100 / 200 / 0(abnormal)`), mapping to CFG-2 `PERIOD=500` (`hzToPeriod(10)=round(5000/10)=500`). 10 Hz falls into the existing normal-rate `applyNormalRate` debounce path: it pushes a CFG-2 live while streaming and is carried into the next handshake while disconnected, never triggering the 0 Hz abnormal confirm dialog.
+
+### Tests 测试
+
+- 在既有 `frontend/tests/config-info-panel.0hz.test.ts` 追加一条 vitest 用例(复用其 `invoke`/`ask` mock 与脚手架,DRY):streaming 时选 10Hz → 不弹确认框,且下发 `send_cfg2_cmd(period:null)` + `send_cfg2(period:500)`;TDD 先红后绿,`vue-tsc` 通过,全量前端测试 12/12 通过 / Added one vitest case to the existing `frontend/tests/config-info-panel.0hz.test.ts` (reusing its `invoke`/`ask` mocks and scaffolding, DRY): selecting 10 Hz while streaming fires no confirm dialog and issues `send_cfg2_cmd(period:null)` + `send_cfg2(period:500)`; written test-first (red→green), `vue-tsc` passes, full frontend suite 12/12 green.
+
 ## [0.8.1] - 2026-06-15
 
 ### Highlights / 亮点
