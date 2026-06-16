@@ -92,4 +92,18 @@ describe("ConfigInfoPanel 速率下拉 0 Hz (异常场景)", () => {
     expect(invoke).toHaveBeenCalledWith("send_command", { idcode: "PMU1", cmd: "send_cfg2", period: 100 }); // hzToPeriod(50)
     wrapper.unmount();
   });
+
+  it("streaming 时选 10Hz → 防抖后下发 PERIOD=500，且无确认框", async () => {
+    setStreaming();
+    const wrapper = mount(ConfigInfoPanel);
+
+    await rateSelect(wrapper).setValue("10");
+    await new Promise((r) => setTimeout(r, 300)); // 等 250ms 防抖
+    await flushPromises();
+
+    expect(ask).not.toHaveBeenCalled(); // 正常档位：不弹确认框
+    expect(invoke).toHaveBeenCalledWith("send_command", { idcode: "PMU1", cmd: "send_cfg2_cmd", period: null });
+    expect(invoke).toHaveBeenCalledWith("send_command", { idcode: "PMU1", cmd: "send_cfg2", period: 500 }); // hzToPeriod(10)
+    wrapper.unmount();
+  });
 });
