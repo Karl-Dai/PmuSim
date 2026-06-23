@@ -24,15 +24,16 @@ fn days_to_date(z: i64) -> (i32, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-pub fn fracsec_to_ms(fracsec: u32, meas_rate: u32, version: u8) -> f64 {
+pub fn fracsec_to_ms(fracsec: u32, meas_rate: u32, _version: u8) -> f64 {
     if meas_rate == 0 {
         return 0.0;
     }
-    let count = if version >= 3 {
-        fracsec & 0x00FFFFFF
-    } else {
-        fracsec
-    };
+    // FRACSEC bit23-0 是亚秒计数，bit31-24 是时标质量字节。C37.118.2 的
+    // V2/V3 FRACSEC 布局一致(GB/T 26865.2 同),无论版本都须屏蔽高 8 位——
+    // 否则真实对端置质量位/失锁翻转时会把质量码当计数,结果暴增导致误报。
+    // 与前端 rate.ts::frameTimeMs 的无条件屏蔽保持一致。`_version` 仅为
+    // 兼容既有调用方签名而保留。
+    let count = fracsec & 0x00FF_FFFF;
     count as f64 / (meas_rate as f64 / 1000.0)
 }
 

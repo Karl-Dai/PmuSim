@@ -13,9 +13,10 @@ use pmusim_core::protocol::builder::{build_command, build_config};
 use pmusim_core::protocol::constants::{
     Cmd, FrameType, ProtocolVersion, IDCODE_LEN, SYNC_BYTE,
 };
-use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, Frame};
+use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, DataFrame, Frame};
 use pmusim_core::protocol::parser::parse;
-use pmusim_core::time_utils::current_soc;
+use pmusim_core::time_utils::{current_soc, soc_to_beijing};
+use pmusim_core::ts_monitor::{TimestampMonitor, TsReport};
 use crate::events::{ConfigInfo, DataInfo, PmuEvent};
 
 /// Async event sink. Tauri side forwards these to `emit("pmu-event", ...)`;
@@ -352,12 +353,16 @@ impl MasterStation {
             }
         }
 
+        // 该数据连接的时间戳错乱监视器(逐帧维护上一帧基准)。
+        let mut ts_monitor = TimestampMonitor::new();
+
         // Parse first data frame.
         {
             let sessions_r = sessions.read().await;
             if let Some(session) = sessions_r.get(&session_idcode) {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
+                        check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
@@ -381,6 +386,7 @@ impl MasterStation {
             if let Some(session) = sessions_r.get(&session_idcode) {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
+                        check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
@@ -844,6 +850,7 @@ impl MasterStation {
                 .map(|c| (c.format_flags, c.phnmr, c.annmr, c.dgnmr));
             (reader, dims)
         };
+        let mut ts_monitor = TimestampMonitor::new();
 
         loop {
             let frame_data = match read_frame(&mut reader).await {
@@ -872,6 +879,20 @@ impl MasterStation {
             let (format_flags, phnmr, annmr, dgnmr) = dims.unwrap_or((0, 0, 0, 0));
 
             if let Ok(Frame::Data(df)) = parse(&frame_data, format_flags, phnmr, annmr, dgnmr) {
+                // 每帧从 session 现取预期间隔做时间戳检测，不快照。原因：主站
+                // 可在流式中下传新 CFG-2 改速率(do_send_cfg2),而子站改速率不
+                // 保证置 STAT bit10——快照会长期失效导致持续误报；与 V2 路径
+                // (每帧重读 cfg2)对齐。read 锁在无写竞争时开销极小。
+                let ts_params = {
+                    let sessions_r = sessions.read().await;
+                    sessions_r
+                        .get(&idcode)
+                        .and_then(|s| s.cfg2.as_ref().or(s.cfg1.as_ref()))
+                        .map(|c| (c.period_ms(), c.meas_rate))
+                };
+                if let Some((period_ms, meas_rate)) = ts_params {
+                    check_frame_timestamp(&mut ts_monitor, &df, period_ms, meas_rate, &event_tx, &idcode);
+                }
                 // STAT bit10 = "子站配置在最近 1 min 内发生改变" (§8.11 表
                 // 12). Cached dims are now stale — once latched we
                 // re-run auto_handshake to pull a fresh CFG-1/CFG-2 and
@@ -1813,4 +1834,37 @@ fn emit_event(event_tx: &EventSender, event: PmuEvent) {
     if let Err(e) = event_tx.send(event) {
         error!("Failed to emit event: {e}");
     }
+}
+
+/// 数据帧时间戳错乱检测。把本帧 SOC/FRACSEC 喂给该连接的 monitor，
+/// 若不按预期间隔递增(回退/跳变/停滞)，复用 Error 事件把异常报文曝给前端。
+fn check_frame_timestamp(
+    monitor: &mut TimestampMonitor,
+    df: &DataFrame,
+    period_ms: f64,
+    meas_rate: u32,
+    event_tx: &EventSender,
+    idcode: &str,
+) {
+    if let Some(r) = monitor.feed(df.soc, df.fracsec, df.version as u8, meas_rate, period_ms) {
+        emit_event(
+            event_tx,
+            PmuEvent::Error {
+                idcode: idcode.to_string(),
+                error: format_ts_anomaly(&r),
+            },
+        );
+    }
+}
+
+fn format_ts_anomaly(r: &TsReport) -> String {
+    format!(
+        "时间戳错乱[{}]: 预期 {:.1}ms 实际 {:.1}ms | SOC={} ({}) FRACSEC=0x{:08x}",
+        r.kind.label(),
+        r.expected_ms,
+        r.actual_ms,
+        r.soc,
+        soc_to_beijing(r.soc),
+        r.fracsec,
+    )
 }
