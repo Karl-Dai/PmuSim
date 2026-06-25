@@ -149,3 +149,10 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// 把文本写入指定路径。前端 CSV 导出用：plugin-dialog 的 save() 选好
+/// 路径后调它落盘，避免引入 plugin-fs 插件 + capabilities 配置。
+#[tauri::command]
+pub fn save_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
