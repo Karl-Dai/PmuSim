@@ -5,7 +5,7 @@
 //! 递增。回退 / 跳变(丢帧) / 停滞(含重复时间戳)即报，由调用方把异常
 //! 报文曝给前端。纯逻辑、无 IO、无时钟，便于单测。
 
-use crate::time_utils::fracsec_to_ms;
+use crate::time_utils::frame_abs_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TsAnomalyKind {
@@ -72,7 +72,7 @@ impl TimestampMonitor {
         meas_rate: u32,
         expected_ms: f64,
     ) -> Option<TsReport> {
-        let cur_ms = soc as f64 * 1000.0 + fracsec_to_ms(fracsec, meas_rate, version);
+        let cur_ms = frame_abs_ms(soc, fracsec, meas_rate, version);
         let prev = self.last_ms.replace(cur_ms);
         // 识别速率切换：本帧 expected 与上次不同 → 旧基准不可比。
         let expected_changed = self.last_expected != Some(expected_ms);
