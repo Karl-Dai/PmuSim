@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProtocol } from "../composables/useProtocol";
 import { useServerStatus } from "../composables/useServerStatus";
@@ -33,6 +33,11 @@ function debounced<T>(ms: number, fn: (v: T) => void | Promise<void>) {
   };
 }
 
+// 配置持久化:仅记输入表单(运行态不存)。恢复期间用 restoring 抑制下面两个
+// 联动 watch,否则协议/命令端口联动会覆盖刚从 localStorage 载入的端口存值。
+const PERSIST_KEY = "pmusim.config.v1";
+const restoring = ref(true);
+
 // Connection form (single substation — reference UI is single-target).
 const connIp = ref("10.15.48.12");
 const connMgmtPort = ref("8000");
@@ -42,11 +47,13 @@ const connDataPortDirty = ref(false);
 // V3 default 8000/8001, V2 default 7000/7001. Reset data-port dirty flag on
 // protocol switch so the user doesn't get stuck on a stale value.
 watch(protocol, (p) => {
+  if (restoring.value) return;
   connMgmtPort.value = p === "V2" ? "7000" : "8000";
   connDataPortDirty.value = false;
   connDataPort.value = p === "V2" ? "7001" : "8001";
 });
 watch(connMgmtPort, (v) => {
+  if (restoring.value) return;
   if (!connDataPortDirty.value) {
     const m = parseInt(v);
     if (Number.isFinite(m)) connDataPort.value = String(m + 1);
@@ -72,6 +79,65 @@ const heartbeatSecs = ref("5");
 // 用于受控注入规约未定义的非法上送周期，验证子站 NACK 应对。
 const injectAbnormal = ref(false);
 const rawPeriod = ref("0");
+
+// 载入上次保存的输入配置(仅表单值;sessions/configs 等运行态不持久化)。
+function loadPersisted() {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    if (c.protocol === "V2" || c.protocol === "V3") protocol.value = c.protocol;
+    if (typeof c.connIp === "string") connIp.value = c.connIp;
+    if (typeof c.connMgmtPort === "string") connMgmtPort.value = c.connMgmtPort;
+    if (typeof c.connDataPort === "string") connDataPort.value = c.connDataPort;
+    if (typeof c.connDataPortDirty === "boolean") connDataPortDirty.value = c.connDataPortDirty;
+    if (typeof c.rateHz === "string") rateHz.value = c.rateHz;
+    if (typeof c.heartbeatSecs === "string") heartbeatSecs.value = c.heartbeatSecs;
+    if (typeof c.injectAbnormal === "boolean") injectAbnormal.value = c.injectAbnormal;
+    if (typeof c.rawPeriod === "string") rawPeriod.value = c.rawPeriod;
+  } catch {
+    /* 存档损坏则回退默认值 */
+  }
+}
+function persist() {
+  try {
+    localStorage.setItem(
+      PERSIST_KEY,
+      JSON.stringify({
+        protocol: protocol.value,
+        connIp: connIp.value,
+        connMgmtPort: connMgmtPort.value,
+        connDataPort: connDataPort.value,
+        connDataPortDirty: connDataPortDirty.value,
+        rateHz: rateHz.value,
+        heartbeatSecs: heartbeatSecs.value,
+        injectAbnormal: injectAbnormal.value,
+        rawPeriod: rawPeriod.value,
+      }),
+    );
+  } catch {
+    /* 隐私模式 / 配额满则放弃保存 */
+  }
+}
+loadPersisted();
+watch(
+  [
+    protocol,
+    connIp,
+    connMgmtPort,
+    connDataPort,
+    connDataPortDirty,
+    rateHz,
+    heartbeatSecs,
+    injectAbnormal,
+    rawPeriod,
+  ],
+  persist,
+);
+// 恢复完成后解除守卫(等本轮被抑制的联动 watch flush 过去),此后协议/端口联动恢复正常。
+nextTick(() => {
+  restoring.value = false;
+});
 
 async function injectPeriod() {
   const s = session.value;
