@@ -102,11 +102,11 @@ let offset = now_unix_ms() - frame_abs_ms(df.soc, df.fracsec, meas_rate, df.vers
 
 ### `useTimeOffset` composable（镜像 `useFrameRate`）
 
-1s 滑窗均值，抹平逐帧网络抖动：
+最近 50 帧定长计数窗求均值，抹平逐帧网络抖动（详见下方裁剪口径）：
 
 ```ts
 export function useTimeOffset() {
-  function tick(offsetMs: number) { /* 推入带时间窗的样本，均值写 offsetMs */ }
+  function tick(offsetMs: number) { /* 推入样本，超 50 丢队首，均值写 offsetMs */ }
   function reset() { /* 清空，offsetMs=null */ }
   return { offsetMs, tick, reset };
 }
