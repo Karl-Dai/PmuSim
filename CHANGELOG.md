@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-25
+
+### Highlights / 亮点
+
+- 🚨 全新「异常报文跳帧监视面板」:把数据帧时间戳错乱(回退 / 跳变 / 停滞)从混杂事件日志中拆出,在主界面底部独立面板结构化分列展示,支持按类型 / 子站筛选、计数徽章、清空、CSV 导出、点行展开详情、折叠与拖高 / New "Frame Anomaly Monitor" panel: timestamp anomalies (backward / gap / stall) are split out of the mixed event log into a dedicated bottom panel with per-column display, type/station filters, count badges, clear, CSV export, row-expand details, and collapse / drag-resize.
+- 🔁 主站作为客户端连接子站时,断线后自动重连,无需手动重连 / When the master connects to a substation as a client, it now auto-reconnects after a dropped link — no manual reconnect needed.
+- ⏱️ 主站实时显示报文时间与本地时间的偏差读数,一眼发现子站对时漂移 / The master shows a live offset between frame time and local time, making substation clock drift obvious at a glance.
+- 💾 连接配置表单持久化到 localStorage,重启应用免重填 / Connection settings persist to localStorage and survive an app restart.
+- 🏷️ 标题栏显示当前运行版本号 / The title bar now shows the running version number.
+
+### Added 新增
+
+- 异常面板(主站):后端新增结构化事件 `PmuEvent::TimestampAnomaly`(`idcode` / `kind` / `expected_ms` / `actual_ms` / `soc` / `fracsec` / `frame_time`);前端 `useAnomalyLog` 状态(FIFO 500 上限、按类型计数)+ `AnomalyPanel.vue` 渲染,含丢帧≈ 估算、FRACSEC hex、SOC 北京时间;新增 `save_text_file` 命令支撑 CSV 落盘(不引入 plugin-fs)/ Anomaly panel (master): new structured `PmuEvent::TimestampAnomaly` event on the backend; a frontend `useAnomalyLog` store (FIFO cap 500, per-kind counts) plus `AnomalyPanel.vue`, with dropped-frame estimate, FRACSEC hex and SOC Beijing time; new `save_text_file` command backs CSV export (no plugin-fs).
+- 主站客户端连接断线自动重连(`useReconnect`):区分真实会话与占位会话,仅在流式断开时触发重连 / Auto-reconnect for the master's client-mode link (`useReconnect`): distinguishes real sessions from placeholders and only retries on a streaming disconnect.
+- 主站「本地时间偏差」实时读数:基于数据帧 SOC/FRACSEC 与本地墙钟比对,毫秒级显示 / Live "clock offset" reading on the master: compares data-frame SOC/FRACSEC against the local wall clock, shown in milliseconds.
+- 连接配置表单(地址 / 端口 / 协议等)持久化到 localStorage / Connection form (address / ports / protocol …) persisted to localStorage.
+- 标题栏运行版本号:通过 Tauri `getVersion()` 运行时读取,始终与实际构建一致 / Running version in the title bar, read at runtime via Tauri `getVersion()` so it always matches the actual build.
+
+### Changed 改进
+
+- 时间戳异常上报由整条字符串 `PmuEvent::Error` 改为结构化 `TimestampAnomaly`;异常不再混入生命周期事件日志,改入专门的异常面板,toast 即时提醒保留 / Timestamp-anomaly reporting moved from a single `PmuEvent::Error` string to the structured `TimestampAnomaly`; anomalies no longer pollute the lifecycle event log — they flow to the dedicated panel, with the instant toast alert preserved.
+
+### Tests 测试
+
+- 新增异常面板前端测试:纯函数(丢帧估算 / CSV)、`useAnomalyLog` 状态、事件分发、`AnomalyPanel` 组件,共 4 个测试文件;全量前端 51 测试、后端 88 测试全部通过 / Added anomaly-panel frontend tests: pure functions (dropped-frame / CSV), the `useAnomalyLog` store, event dispatch and the `AnomalyPanel` component — 4 files; full frontend suite (51 tests) and backend (88 tests) all green.
+
 ## [0.10.0] - 2026-06-25
 
 ### Highlights / 亮点
