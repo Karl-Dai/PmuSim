@@ -5,6 +5,7 @@ import { useCommLog } from "./useCommLog";
 import { useToast } from "./useToast";
 import { useEventLog } from "./useEventLog";
 import { useFrameRate } from "./useFrameRate";
+import { useTimeOffset } from "./useTimeOffset";
 import { frameTimeMs } from "../lib/rate";
 import { t } from "../i18n";
 
@@ -31,6 +32,7 @@ export function usePmuEvents() {
   const { push: pushToast } = useToast();
   const { push: pushEvent } = useEventLog();
   const { tick: tickFrameRate, reset: resetFrameRate } = useFrameRate();
+  const { tick: tickOffset, reset: resetOffset } = useTimeOffset();
 
   function handle(payload: PmuEvent) {
     switch (payload.type) {
@@ -46,6 +48,7 @@ export function usePmuEvents() {
           pushEvent(t("event.pipeDisconnected", { idcode: payload.idcode }));
         }
         resetFrameRate();
+        resetOffset();
         break;
       case "Cfg1Received":
         updateState(payload.idcode, "cfg1_received");
@@ -70,6 +73,7 @@ export function usePmuEvents() {
         updateState(payload.idcode, "cfg2_sent");
         pushEvent(t("event.dataPaused"));
         resetFrameRate();
+        resetOffset();
         break;
       case "DataFrame": {
         addData(payload.idcode, payload.data);
@@ -77,6 +81,7 @@ export function usePmuEvents() {
         // measRate 取该 idcode 的 CFG TIME_BASE，缺省 1e6。
         const measRate = configs.get(payload.idcode)?.measRate ?? 1_000_000;
         tickFrameRate(frameTimeMs(payload.data.soc, payload.data.fracsec, measRate));
+        tickOffset(payload.data.local_offset_ms);
         break;
       }
       case "RawFrame":
@@ -90,6 +95,7 @@ export function usePmuEvents() {
         pushEvent(t("event.heartbeatTimeout", { idcode: payload.idcode }), "error");
         removeSession(payload.idcode);
         resetFrameRate();
+        resetOffset();
         break;
       case "Error":
         pushToast(payload.idcode ? `${payload.idcode}: ${payload.error}` : payload.error, "error");
