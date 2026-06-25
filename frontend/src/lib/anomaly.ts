@@ -46,5 +46,5 @@ export function buildCsv(entries: AnomalyEntry[]): string {
     e.frameTime,
     fracHex(e.fracsec),
   ]);
-  return [CSV_HEADER, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  return [CSV_HEADER, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

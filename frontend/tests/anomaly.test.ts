@@ -29,6 +29,7 @@ describe("droppedFrames", () => {
   });
   it("expected<=0 → 0（防除零）", () => {
     expect(droppedFrames(40, 0)).toBe(0);
+    expect(droppedFrames(40, -1)).toBe(0);
   });
 });
 
@@ -47,15 +48,17 @@ describe("buildCsv", () => {
   it("首行是表头，gap 行带丢帧数，数值 1 位小数，FRACSEC 为 hex", () => {
     const csv = buildCsv([entry()]);
     const lines = csv.split("\r\n");
-    expect(lines.length).toBe(2);
+    expect(lines.filter(Boolean).length).toBe(2);
+    expect(csv.endsWith("\r\n")).toBe(true);
     expect(lines[0]).toContain("FRACSEC");
     expect(lines[1]).toContain("14:30:45");
     expect(lines[1]).toContain("PMU1");
     expect(lines[1]).toContain("20.0");
     expect(lines[1]).toContain("40.0");
     expect(lines[1]).toContain("0x000d9490");
-    // 丢帧列 = 1
-    expect(lines[1].split(",")).toContain("1");
+    // 丢帧列（索引 5）= 1
+    const cells = lines[1].split(",");
+    expect(cells[5]).toBe("1");
   });
   it("非 gap 行丢帧列为空", () => {
     const csv = buildCsv([entry({ kind: "stall", actualMs: 0 })]);
