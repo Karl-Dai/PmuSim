@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-25
+
+### Highlights / 亮点
+
+- 🕵️ 主站接收侧新增「数据帧时间戳错乱检测」:逐帧校验数据帧 SOC+FRACSEC 换算的绝对毫秒是否按当前数据速率间隔正常递增,回退 / 跳变(丢帧) / 停滞三类异常即时曝光,无需肉眼盯流 / New "data-frame timestamp anomaly detection" on the master's receive side: every data frame's absolute milliseconds (from SOC+FRACSEC) is checked against the current reporting interval, and three anomaly classes — backward / gap (frame loss) / stall — are surfaced the instant they happen, no eyeballing the stream.
+- 🔔 复用既有 Error 事件通道,前端零改动:异常报文带「类型 / 预期·实际间隔 / SOC 北京时间 / FRACSEC」直接进前端 toast + 事件日志 / Reuses the existing Error event channel with zero frontend changes: each anomaly carries its type, expected vs. actual interval, SOC (Beijing time) and FRACSEC straight into the frontend toast + event log.
+- 🧪 新增 `pmusim-core::ts_monitor` 纯检测模块 + 16 个单测,挂载 V2/V3 全部数据帧路径 / Added a pure `pmusim-core::ts_monitor` detection module with 16 unit tests, wired into every V2/V3 data-frame path.
+
+### Added 新增
+
+- 新增 `pmusim-core::ts_monitor::TimestampMonitor`:纯检测逻辑,逐帧 `feed` 当前帧绝对毫秒与速率间隔 `period_ms`,返回 `TsReport`。异常分三类——`Backward` 回退(delta<0)/ `Gap` 跳变(间隔过大,丢帧)/ `Stall` 停滞(时标不前进)/ New `pmusim-core::ts_monitor::TimestampMonitor`: pure detection logic that is `feed` each frame's absolute milliseconds and the rate interval `period_ms`, returning a `TsReport`. Anomalies fall into three kinds — `Backward` (delta<0), `Gap` (interval too large → frame loss) and `Stall` (timestamp not advancing).
+- 检测挂载主站 V2 `handle_data_connection` 与 V3 `data_read_loop_outbound` 的全部数据帧路径,逐帧校验后复用 Error 事件曝光异常报文 / The detector is mounted on every data-frame path — V2 `handle_data_connection` and V3 `data_read_loop_outbound` — checking frame-by-frame and reusing the Error event to expose the offending frame.
+
+### Changed 改进
+
+- `fracsec_to_ms` 无条件屏蔽 FRACSEC 高 8 位时标质量码(对齐前端 `rate.ts`),修复 V2 质量位翻转造成的误报 / `fracsec_to_ms` now unconditionally masks the high 8 FRACSEC bits (time-quality), aligning with the frontend `rate.ts` and fixing false positives from V2 quality-bit flips.
+- 容差改为纯比例 `expected*0.5`(修高数据率盲区);速率切换过渡帧跳过;V3 改为每帧实时取当前间隔(修实时改速率后持续误报);小幅回退也判定为 `Backward` / Tolerance is now a pure ratio `expected*0.5` (fixing the high-rate blind spot); rate-switch transition frames are skipped; V3 reads the current interval live per frame (fixing sustained false positives after a live rate change); small backward jumps are also classified as `Backward`.
+
+### Tests 测试
+
+- `crates/pmusim-core/src/ts_monitor.rs` 新增 16 个单测,覆盖回退 / 跳变 / 停滞三类判定、容差边界、速率切换过渡、FRACSEC 质量位屏蔽等场景 / Added 16 unit tests in `crates/pmusim-core/src/ts_monitor.rs`, covering the backward / gap / stall classifications, tolerance boundaries, rate-switch transitions and FRACSEC quality-bit masking.
+
 ## [0.9.0] - 2026-06-16
 
 ### Highlights / 亮点
