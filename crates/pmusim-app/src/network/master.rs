@@ -15,7 +15,7 @@ use pmusim_core::protocol::constants::{
 };
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, DataFrame, Frame};
 use pmusim_core::protocol::parser::parse;
-use pmusim_core::time_utils::{current_soc, soc_to_beijing};
+use pmusim_core::time_utils::{current_soc, frame_abs_ms, now_unix_ms, soc_to_beijing};
 use pmusim_core::ts_monitor::{TimestampMonitor, TsReport};
 use crate::events::{ConfigInfo, DataInfo, PmuEvent};
 
@@ -363,11 +363,13 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
+                        let local_offset_ms = now_unix_ms()
+                            - frame_abs_ms(df.soc, df.fracsec, cfg2.meas_rate, df.version as u8);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
-                                data: data_frame_to_info(&df),
+                                data: data_frame_to_info(&df, local_offset_ms),
                             },
                         );
                     }
@@ -387,11 +389,13 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
+                        let local_offset_ms = now_unix_ms()
+                            - frame_abs_ms(df.soc, df.fracsec, cfg2.meas_rate, df.version as u8);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
-                                data: data_frame_to_info(&df),
+                                data: data_frame_to_info(&df, local_offset_ms),
                             },
                         );
                     }
@@ -932,11 +936,13 @@ impl MasterStation {
                     }
                 }
 
+                let local_offset_ms = now_unix_ms()
+                    - frame_abs_ms(df.soc, df.fracsec, ts_params.map(|(_, mr)| mr).unwrap_or(0), df.version as u8);
                 emit_event(
                     &event_tx,
                     PmuEvent::DataFrame {
                         idcode: idcode.clone(),
-                        data: data_frame_to_info(&df),
+                        data: data_frame_to_info(&df, local_offset_ms),
                     },
                 );
             }
@@ -1815,7 +1821,7 @@ fn hex_encode(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo {
+fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame, local_offset_ms: f64) -> DataInfo {
     DataInfo {
         soc: df.soc,
         fracsec: df.fracsec,
@@ -1827,6 +1833,7 @@ fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo 
         analog: df.analog.clone(),
         digital: df.digital.clone(),
         phasors: df.phasors.clone(),
+        local_offset_ms,
     }
 }
 
@@ -1867,4 +1874,36 @@ fn format_ts_anomaly(r: &TsReport) -> String {
         soc_to_beijing(r.soc),
         r.fracsec,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pmusim_core::protocol::constants::ProtocolVersion;
+    use pmusim_core::protocol::frame::DataFrame;
+
+    fn sample_df() -> DataFrame {
+        DataFrame {
+            version: ProtocolVersion::V2,
+            idcode: "TEST".into(),
+            soc: 100,
+            fracsec: 0,
+            stat: 0,
+            format_flags: 0,
+            phasors: vec![],
+            freq: 0.0,
+            dfreq: 0.0,
+            analog: vec![],
+            digital: vec![],
+        }
+    }
+
+    #[test]
+    fn data_frame_to_info_carries_offset() {
+        // 偏差作为参数传入，应原样落入 DataInfo（确定性，不依赖时钟）。
+        let df = sample_df();
+        let info = data_frame_to_info(&df, 123.5);
+        assert_eq!(info.local_offset_ms, 123.5);
+        assert_eq!(info.soc, 100);
+    }
 }
