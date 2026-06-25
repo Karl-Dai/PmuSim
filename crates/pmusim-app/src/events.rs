@@ -15,6 +15,18 @@ pub enum PmuEvent {
     RawFrame { idcode: String, direction: String, hex: String },
     HeartbeatTimeout { idcode: String },
     Error { idcode: String, error: String },
+    TimestampAnomaly {
+        idcode: String,
+        /// "backward" | "gap" | "stall"
+        kind: String,
+        expected_ms: f64,
+        /// 回退时为负
+        actual_ms: f64,
+        soc: u32,
+        fracsec: u32,
+        /// soc_to_beijing(soc) 算好的北京时间字符串
+        frame_time: String,
+    },
 }
 
 // Match the TypeScript ConfigInfo type (camelCase). Without this rename,
