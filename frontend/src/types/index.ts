@@ -33,6 +33,8 @@ export interface DataInfo {
   digital: number[];
   /** Each pair: (real, imag) when format bit0=0, (magnitude, angle) when bit0=1. */
   phasors: [number, number][];
+  /** 后端接收时刻 now − 报文时间戳(ms)。正=报文滞后本地，负=超前。 */
+  local_offset_ms: number;
 }
 
 export interface RawFrameInfo {

@@ -82,11 +82,29 @@ pub fn fracsec_from_fraction(fraction: f64, meas_rate: u32, version: u8, time_qu
     }
 }
 
+/// 数据帧自带时间戳的绝对毫秒：SOC 秒 + FRACSEC 亚秒。FRACSEC 高 8 位
+/// 时标质量码由 `fracsec_to_ms` 无条件屏蔽（见其文档），避免质量位翻转
+/// 污染换算。`version` 仅为兼容签名保留。偏差测量与 `ts_monitor` 共用此
+/// 定义，避免「帧绝对毫秒」散落两处。
+pub fn frame_abs_ms(soc: u32, fracsec: u32, meas_rate: u32, version: u8) -> f64 {
+    soc as f64 * 1000.0 + fracsec_to_ms(fracsec, meas_rate, version)
+}
+
 pub fn current_soc() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as u32
+}
+
+/// 本机墙钟相对 UNIX epoch 的毫秒数（f64，保留亚毫秒）。偏差测量的
+/// 「本地时间」基准——受本机时钟是否校准影响，这正是要暴露的对象。
+/// 时钟早于 epoch（不可能但防御）时返回 0。
+pub fn now_unix_ms() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -155,5 +173,34 @@ mod tests {
     #[test]
     fn fracsec_from_fraction_zero_rate() {
         assert_eq!(fracsec_from_fraction(0.5, 0, 3, 0), 0);
+    }
+
+    #[test]
+    fn frame_abs_ms_seconds_plus_subsecond() {
+        // soc=100s, fracsec=0 → 100_000ms；20ms 亚秒 → 100_020ms。
+        assert!((frame_abs_ms(100, 0, 1_000_000, 2) - 100_000.0).abs() < 0.001);
+        let frac20 = 20 * (1_000_000 / 1000); // 20ms @ TIME_BASE 1µs
+        assert!((frame_abs_ms(100, frac20, 1_000_000, 2) - 100_020.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn frame_abs_ms_cross_second() {
+        // 980ms 亚秒 → 100_980ms（验证 soc*1000 与亚秒相加）。
+        let frac980 = 980 * (1_000_000 / 1000);
+        assert!((frame_abs_ms(100, frac980, 1_000_000, 2) - 100_980.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn frame_abs_ms_masks_quality_bits() {
+        // V2/V3 FRACSEC 高 8 位质量码须被屏蔽，不污染绝对毫秒。
+        let frac = 20 * (1_000_000 / 1000) | (0x0F << 24);
+        assert!((frame_abs_ms(100, frac, 1_000_000, 3) - 100_020.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn now_unix_ms_is_sane() {
+        // 必为正且晚于 2023-01-01（1_672_531_200_000ms）。
+        let now = now_unix_ms();
+        assert!(now > 1_672_531_200_000.0, "got {now}");
     }
 }

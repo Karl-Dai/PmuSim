@@ -52,6 +52,9 @@ pub struct DataInfo {
     pub analog: Vec<f64>,
     pub digital: Vec<u16>,
     pub phasors: Vec<(f64, f64)>,
+    /// 接收时刻本机时钟与本帧报文时间戳之差(ms)：now − 报文时间。
+    /// 正=报文滞后本地，负=报文超前本地。仅展示用，不参与编码。
+    pub local_offset_ms: f64,
 }
 
 impl From<&pmusim_core::protocol::frame::ConfigFrame> for ConfigInfo {

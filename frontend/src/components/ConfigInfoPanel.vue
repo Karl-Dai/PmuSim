@@ -7,6 +7,7 @@ import { useSessions } from "../composables/useSessions";
 import { useCommLog } from "../composables/useCommLog";
 import { useEventLog } from "../composables/useEventLog";
 import { useFrameRate } from "../composables/useFrameRate";
+import { useTimeOffset } from "../composables/useTimeOffset";
 import { useToast, toastError } from "../composables/useToast";
 import { listenerReady } from "../composables/usePmuEvents";
 import { useReconnect } from "../composables/useReconnect";
@@ -35,6 +36,14 @@ function reconnectTarget(mode: "normal" | "skipCfg2") {
 const { latestData } = useCommLog();
 const { events } = useEventLog();
 const { fps } = useFrameRate();
+const { offsetMs } = useTimeOffset();
+// 偏差读数:带符号整数 ms；无样本显示「—」。正号显式加，负号由数字自带。
+const clockOffsetText = computed(() => {
+  const v = offsetMs.value;
+  if (v === null) return "—";
+  const r = Math.round(v);
+  return (r > 0 ? "+" : "") + r;
+});
 const { push: pushToast } = useToast();
 
 // Debounce select changes so holding ↑/↓ doesn't fire one invoke per tick
@@ -460,6 +469,7 @@ watch(rateHz, async (v, old) => {
         <div class="rd-row"><label>{{ t("config.status") }}</label><span class="rd-val" :class="stateClass">{{ displayState || "—" }}</span></div>
         <div class="rd-row"><label>{{ t("config.latestTime") }}</label><span class="rd-val mono">{{ latestTime }}</span></div>
         <div class="rd-row"><label>{{ t("config.uploadRate") }}</label><span class="rd-val mono">{{ fps }} <span class="unit">{{ t("config.fpsUnit") }}</span></span></div>
+        <div class="rd-row"><label>{{ t("config.clockOffset") }}</label><span class="rd-val mono">{{ clockOffsetText }}<span v-if="offsetMs !== null" class="unit">{{ t("config.msUnit") }}</span></span></div>
       </div>
       </div>
     </section>
