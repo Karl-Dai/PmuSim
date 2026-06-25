@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { useToast } from "./composables/useToast";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
@@ -16,6 +17,7 @@ type UpdateMeta = { version: string; notes: string; pub_date?: string | null };
 const updateMeta = ref<UpdateMeta | null>(null);
 const updateVisible = ref(false);
 const checking = ref(false);
+const appVersion = ref("");
 
 async function checkUpdate(force = false) {
   if (checking.value) return;
@@ -48,7 +50,14 @@ function onSnooze() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // Show the running version in the title bar — getVersion() reads
+  // tauri.conf.json's version at runtime, so it always matches the actual build.
+  try {
+    appVersion.value = await getVersion();
+  } catch (e) {
+    console.warn("getVersion failed", e);
+  }
   // Auto-check on startup; silent on failure / already-latest.
   checkUpdate(false);
 });
@@ -57,7 +66,7 @@ onMounted(() => {
 <template>
   <div class="app">
     <div class="title-bar">
-      <span>{{ t("app.title") }}</span>
+      <span>{{ t("app.title") }}<span v-if="appVersion" class="app-version">v{{ appVersion }}</span></span>
       <div class="title-actions">
         <div class="lang-toggle" role="group" aria-label="Language">
           <button :class="{ on: locale === 'zh' }" @click="setLocale('zh')">中</button>
@@ -149,6 +158,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.app-version {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 11px;
+  opacity: 0.72;
+  letter-spacing: 0;
+  text-shadow: none;
 }
 .title-actions {
   display: flex;
