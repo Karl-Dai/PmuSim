@@ -57,6 +57,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'state.cfg2_sent': '已下传 CFG-2',
     'state.streaming': '正在接收',
     'state.disconnected': '已断开',
+    'state.reconnecting': '重连中…',
     // Data table
     'data.colNo': '序号',
     'data.colName': '名称',
@@ -164,6 +165,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'state.cfg2_sent': 'CFG-2 sent',
     'state.streaming': 'Streaming',
     'state.disconnected': 'Disconnected',
+    'state.reconnecting': 'Reconnecting…',
     // Data table
     'data.colNo': 'No.',
     'data.colName': 'Name',

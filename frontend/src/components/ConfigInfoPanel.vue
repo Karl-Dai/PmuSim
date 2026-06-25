@@ -10,6 +10,7 @@ import { useFrameRate } from "../composables/useFrameRate";
 import { useTimeOffset } from "../composables/useTimeOffset";
 import { useToast, toastError } from "../composables/useToast";
 import { listenerReady } from "../composables/usePmuEvents";
+import { useReconnect } from "../composables/useReconnect";
 import { useI18n } from "../i18n";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { hzToPeriod, frameTimeMs } from "../lib/rate";
@@ -18,6 +19,20 @@ const { t } = useI18n();
 const { protocol } = useProtocol();
 const { running } = useServerStatus();
 const { sessions, configs, selectedIdcode } = useSessions();
+const reconnect = useReconnect();
+
+function reconnectTarget(mode: "normal" | "skipCfg2") {
+  const hz = parseFloat(rateHz.value);
+  return {
+    host: connIp.value.trim(),
+    mgmtPort: parseInt(connMgmtPort.value),
+    dataPort: parseInt(connDataPort.value),
+    protocol: protocol.value,
+    period: Number.isFinite(hz) ? hzToPeriod(hz) : null,
+    mode,
+  };
+}
+
 const { latestData } = useCommLog();
 const { events } = useEventLog();
 const { fps } = useFrameRate();
@@ -176,8 +191,11 @@ const stateLabel = computed(() => {
   if (!s) return "";
   return t(`state.${s}`);
 });
-// 状态语义色：在线类绿、断开红、无会话不着色
+const displayState = computed(() => (reconnect.reconnecting.value ? t("state.reconnecting") : stateLabel.value));
+
+// 状态语义色：在线类绿、断开红、重连中琥珀、无会话不着色
 const stateClass = computed(() => {
+  if (reconnect.reconnecting.value) return "st-warn";
   const s = session.value?.state;
   if (!s) return "";
   if (s === "disconnected") return "st-err";
@@ -245,6 +263,7 @@ async function startEverything() {
     // peer (host:port) so the placeholder works.
     const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
     await invoke("auto_handshake", { idcode: target, period: periodVal });
+    reconnect.arm(reconnectTarget("normal"));
   } catch (e) {
     pushToast(t("config.startFailed", { error: toastError(e) }), "error");
   } finally {
@@ -276,6 +295,7 @@ async function skipCfg2Connect() {
     }
     const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
     await invoke("skip_cfg2_open", { idcode: target });
+    reconnect.arm(reconnectTarget("skipCfg2"));
   } catch (e) {
     pushToast(t("config.startFailed", { error: toastError(e) }), "error");
   } finally {
@@ -289,6 +309,7 @@ async function stopEverything() {
   try {
     await invoke("stop_server");
     running.value = false;
+    reconnect.cancel();
   } catch (e) {
     pushToast(t("config.stopFailed", { error: toastError(e) }), "error");
   } finally {
@@ -445,7 +466,7 @@ watch(rateHz, async (v, old) => {
       </div>
 
       <div class="readout">
-        <div class="rd-row"><label>{{ t("config.status") }}</label><span class="rd-val" :class="stateClass">{{ stateLabel || "—" }}</span></div>
+        <div class="rd-row"><label>{{ t("config.status") }}</label><span class="rd-val" :class="stateClass">{{ displayState || "—" }}</span></div>
         <div class="rd-row"><label>{{ t("config.latestTime") }}</label><span class="rd-val mono">{{ latestTime }}</span></div>
         <div class="rd-row"><label>{{ t("config.uploadRate") }}</label><span class="rd-val mono">{{ fps }} <span class="unit">{{ t("config.fpsUnit") }}</span></span></div>
         <div class="rd-row"><label>{{ t("config.clockOffset") }}</label><span class="rd-val mono">{{ clockOffsetText }}<span v-if="offsetMs !== null" class="unit">{{ t("config.msUnit") }}</span></span></div>
