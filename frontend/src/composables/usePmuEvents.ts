@@ -7,6 +7,7 @@ import { useEventLog } from "./useEventLog";
 import { useFrameRate } from "./useFrameRate";
 import { frameTimeMs } from "../lib/rate";
 import { t } from "../i18n";
+import { useReconnect } from "./useReconnect";
 
 // We poll `poll_events` instead of using Tauri's listen()/emit() pair.
 // On macOS WebKit, `listen()` IPC reliably deadlocks until the webview
@@ -26,7 +27,8 @@ export const listenerReady: Promise<void> = new Promise((res) => {
 });
 
 export function usePmuEvents() {
-  const { addSession, updateState, removeSession, setConfig, configs } = useSessions();
+  const { sessions, addSession, updateState, removeSession, setConfig, configs } = useSessions();
+  const reconnect = useReconnect();
   const { addData } = useCommLog();
   const { push: pushToast } = useToast();
   const { push: pushEvent } = useEventLog();
@@ -40,13 +42,16 @@ export function usePmuEvents() {
           pushEvent(t("event.mgmtEstablished", { idcode: payload.idcode, ip: payload.peer_ip }));
         }
         break;
-      case "SessionDisconnected":
+      case "SessionDisconnected": {
+        const wasStreaming = sessions.get(payload.idcode)?.state === "streaming";
         removeSession(payload.idcode);
         if (!payload.idcode.includes(":")) {
           pushEvent(t("event.pipeDisconnected", { idcode: payload.idcode }));
+          reconnect.onDisconnect(wasStreaming);
         }
         resetFrameRate();
         break;
+      }
       case "Cfg1Received":
         updateState(payload.idcode, "cfg1_received");
         setConfig(payload.idcode, payload.cfg);
@@ -85,12 +90,15 @@ export function usePmuEvents() {
         // — buffering ~100 frames/s into a 1000-cap ring is just a 10s
         // sliding window of hex strings nobody reads.
         break;
-      case "HeartbeatTimeout":
+      case "HeartbeatTimeout": {
+        const wasStreaming = sessions.get(payload.idcode)?.state === "streaming";
         pushToast(t("event.heartbeatTimeoutToast", { idcode: payload.idcode }), "error");
         pushEvent(t("event.heartbeatTimeout", { idcode: payload.idcode }), "error");
         removeSession(payload.idcode);
         resetFrameRate();
+        reconnect.onDisconnect(wasStreaming);
         break;
+      }
       case "Error":
         pushToast(payload.idcode ? `${payload.idcode}: ${payload.error}` : payload.error, "error");
         pushEvent(payload.error, "error");
