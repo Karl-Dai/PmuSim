@@ -16,7 +16,7 @@ use pmusim_core::protocol::constants::{
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, DataFrame, Frame};
 use pmusim_core::protocol::parser::parse;
 use pmusim_core::time_utils::{current_soc, frame_abs_ms, now_unix_ms, soc_to_beijing};
-use pmusim_core::ts_monitor::{TimestampMonitor, TsReport};
+use pmusim_core::ts_monitor::{TimestampMonitor, TsAnomalyKind};
 use crate::events::{ConfigInfo, DataInfo, PmuEvent};
 
 /// Async event sink. Tauri side forwards these to `emit("pmu-event", ...)`;
@@ -1843,8 +1843,7 @@ fn emit_event(event_tx: &EventSender, event: PmuEvent) {
     }
 }
 
-/// 数据帧时间戳错乱检测。把本帧 SOC/FRACSEC 喂给该连接的 monitor，
-/// 若不按预期间隔递增(回退/跳变/停滞)，复用 Error 事件把异常报文曝给前端。
+/// 逐帧喂入时间戳监视器，异常则把结构化报文曝给前端。
 fn check_frame_timestamp(
     monitor: &mut TimestampMonitor,
     df: &DataFrame,
@@ -1856,24 +1855,26 @@ fn check_frame_timestamp(
     if let Some(r) = monitor.feed(df.soc, df.fracsec, df.version as u8, meas_rate, period_ms) {
         emit_event(
             event_tx,
-            PmuEvent::Error {
+            PmuEvent::TimestampAnomaly {
                 idcode: idcode.to_string(),
-                error: format_ts_anomaly(&r),
+                kind: anomaly_code(r.kind).to_string(),
+                expected_ms: r.expected_ms,
+                actual_ms: r.actual_ms,
+                soc: r.soc,
+                fracsec: r.fracsec,
+                frame_time: soc_to_beijing(r.soc),
             },
         );
     }
 }
 
-fn format_ts_anomaly(r: &TsReport) -> String {
-    format!(
-        "时间戳错乱[{}]: 预期 {:.1}ms 实际 {:.1}ms | SOC={} ({}) FRACSEC=0x{:08x}",
-        r.kind.label(),
-        r.expected_ms,
-        r.actual_ms,
-        r.soc,
-        soc_to_beijing(r.soc),
-        r.fracsec,
-    )
+/// TsAnomalyKind → 前端 code（不在 pmusim-core 加 serde，保持 core 纯逻辑）。
+fn anomaly_code(kind: TsAnomalyKind) -> &'static str {
+    match kind {
+        TsAnomalyKind::Backward => "backward",
+        TsAnomalyKind::Gap => "gap",
+        TsAnomalyKind::Stall => "stall",
+    }
 }
 
 #[cfg(test)]

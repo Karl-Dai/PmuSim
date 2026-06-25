@@ -6,6 +6,7 @@ import { useToast } from "./composables/useToast";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
+import AnomalyPanel from "./components/AnomalyPanel.vue";
 import { useI18n } from "./i18n";
 
 // PMU event listener is attached in main.ts BEFORE this component mounts
@@ -86,6 +87,8 @@ onMounted(async () => {
       <ConfigInfoPanel />
       <DataTablePanel />
     </div>
+
+    <AnomalyPanel />
 
     <div class="toasts" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" :class="['toast', `toast-${t.kind}`]" @click="dismiss(t.id)">

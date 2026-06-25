@@ -9,6 +9,8 @@ import { useTimeOffset } from "./useTimeOffset";
 import { frameTimeMs } from "../lib/rate";
 import { t } from "../i18n";
 import { useReconnect } from "./useReconnect";
+import { useAnomalyLog } from "./useAnomalyLog";
+import { kindI18nKey } from "../lib/anomaly";
 
 // We poll `poll_events` instead of using Tauri's listen()/emit() pair.
 // On macOS WebKit, `listen()` IPC reliably deadlocks until the webview
@@ -35,6 +37,7 @@ export function usePmuEvents() {
   const { push: pushEvent } = useEventLog();
   const { tick: tickFrameRate, reset: resetFrameRate } = useFrameRate();
   const { tick: tickOffset, reset: resetOffset } = useTimeOffset();
+  const { push: pushAnomaly } = useAnomalyLog();
 
   function handle(payload: PmuEvent) {
     switch (payload.type) {
@@ -103,6 +106,20 @@ export function usePmuEvents() {
         resetFrameRate();
         resetOffset();
         reconnect.onDisconnect(wasStreaming);
+        break;
+      }
+      case "TimestampAnomaly": {
+        pushAnomaly(payload);
+        const label = t(kindI18nKey(payload.kind));
+        pushToast(
+          t("anomaly.toast", {
+            idcode: payload.idcode,
+            kind: label,
+            expected: payload.expected_ms.toFixed(1),
+            actual: payload.actual_ms.toFixed(1),
+          }),
+          "error",
+        );
         break;
       }
       case "Error":

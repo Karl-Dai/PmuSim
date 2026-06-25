@@ -55,4 +55,17 @@ export type PmuEvent =
   | { type: "DataFrame"; idcode: string; data: DataInfo }
   | { type: "RawFrame"; idcode: string; direction: string; hex: string }
   | { type: "HeartbeatTimeout"; idcode: string }
+  | { type: "TimestampAnomaly"; idcode: string; kind: string; expected_ms: number; actual_ms: number; soc: number; fracsec: number; frame_time: string }
   | { type: "Error"; idcode: string; error: string };
+
+export interface AnomalyEntry {
+  id: number;
+  localTime: string; // 收报墙钟时刻 "HH:MM:SS"
+  idcode: string;
+  kind: string; // "backward" | "gap" | "stall" | 未知 code 原样
+  expectedMs: number;
+  actualMs: number; // 回退时为负
+  soc: number;
+  fracsec: number;
+  frameTime: string; // 后端给的北京时间
+}
