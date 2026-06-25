@@ -9,10 +9,12 @@ import ConfigInfoPanel from "../src/components/ConfigInfoPanel.vue";
 import { useSessions } from "../src/composables/useSessions";
 import { useReconnect } from "../src/composables/useReconnect";
 import { usePmuEvents } from "../src/composables/usePmuEvents";
+import { setLocale } from "../src/i18n";
 
 const reconnect = useReconnect();
 
 beforeEach(() => {
+  setLocale("en");
   const { sessions, selectedIdcode } = useSessions();
   sessions.clear();
   selectedIdcode.value = "";

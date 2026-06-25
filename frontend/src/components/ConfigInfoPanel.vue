@@ -184,8 +184,9 @@ const stateLabel = computed(() => {
 });
 const displayState = computed(() => (reconnect.reconnecting.value ? t("state.reconnecting") : stateLabel.value));
 
-// 状态语义色：在线类绿、断开红、无会话不着色
+// 状态语义色：在线类绿、断开红、重连中琥珀、无会话不着色
 const stateClass = computed(() => {
+  if (reconnect.reconnecting.value) return "st-warn";
   const s = session.value?.state;
   if (!s) return "";
   if (s === "disconnected") return "st-err";
