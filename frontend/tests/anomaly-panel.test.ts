@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -74,8 +74,7 @@ describe("AnomalyPanel", () => {
     const wrapper = mount(AnomalyPanel);
     await wrapper.find(".anomaly-header").trigger("click");
     await wrapper.find("button.btn-export").trigger("click");
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushPromises();
     expect(save).toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({ path: "/tmp/out.csv" }));
   });

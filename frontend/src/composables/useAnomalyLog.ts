@@ -8,6 +8,18 @@ let nextId = 1;
 
 type AnomalyEvent = Extract<PmuEvent, { type: "TimestampAnomaly" }>;
 
+const counts = computed(() => {
+  let backward = 0;
+  let gap = 0;
+  let stall = 0;
+  for (const e of entries) {
+    if (e.kind === "backward") backward++;
+    else if (e.kind === "gap") gap++;
+    else if (e.kind === "stall") stall++;
+  }
+  return { backward, gap, stall, total: entries.length };
+});
+
 function localNow(): string {
   const d = new Date();
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -33,18 +45,6 @@ export function useAnomalyLog() {
   function clear() {
     entries.splice(0);
   }
-
-  const counts = computed(() => {
-    let backward = 0;
-    let gap = 0;
-    let stall = 0;
-    for (const e of entries) {
-      if (e.kind === "backward") backward++;
-      else if (e.kind === "gap") gap++;
-      else if (e.kind === "stall") stall++;
-    }
-    return { backward, gap, stall, total: entries.length };
-  });
 
   return { entries, push, clear, counts };
 }

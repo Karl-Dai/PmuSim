@@ -29,7 +29,7 @@ function csvCell(s: string): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function fracHex(fracsec: number): string {
+export function fracHex(fracsec: number): string {
   return "0x" + (fracsec >>> 0).toString(16).padStart(8, "0");
 }
 

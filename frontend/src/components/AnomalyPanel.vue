@@ -5,7 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { useAnomalyLog } from "../composables/useAnomalyLog";
 import { useToast } from "../composables/useToast";
 import { useI18n } from "../i18n";
-import { buildCsv, droppedFrames, kindI18nKey } from "../lib/anomaly";
+import { buildCsv, droppedFrames, fracHex, kindI18nKey } from "../lib/anomaly";
 import type { AnomalyEntry } from "../types";
 
 const { entries, clear, counts } = useAnomalyLog();
@@ -53,9 +53,6 @@ const filtered = computed(() =>
 
 function kindLabel(kind: string): string {
   return t(kindI18nKey(kind));
-}
-function fracHex(f: number): string {
-  return "0x" + (f >>> 0).toString(16).padStart(8, "0");
 }
 function droppedText(e: AnomalyEntry): string {
   return e.kind === "gap" ? "≈" + droppedFrames(e.actualMs, e.expectedMs) : "";
