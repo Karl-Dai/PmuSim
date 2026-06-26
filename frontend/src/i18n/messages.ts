@@ -66,6 +66,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     'data.empty': '点击「连接」后,CFG-2 到达再显示通道列表',
     'data.digitalOn': '合位',
     'data.digitalOff': '分位',
+    'data.phasor': '相量',
+    'data.freq': '系统频率',
+    'data.rocof': '频率变化率',
+    'data.angleUnit': '°',
+    'data.hzUnit': 'Hz',
     // STAT decode
     'stat.dataValid': '数据可用',
     'stat.deviceStatus': '装置状态',
@@ -141,6 +146,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     'anomaly.exportDone': '已导出 {n} 条',
     'anomaly.exportEmpty': '无数据可导出',
     'anomaly.csvName': '异常跳帧记录.csv',
+    'station.title': '子站列表',
+    'station.empty': '暂无子站',
+    'station.fpsUnit': 'fps',
   },
   en: {
     // App / title bar
@@ -282,5 +290,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     'anomaly.exportDone': 'Exported {n} rows',
     'anomaly.exportEmpty': 'Nothing to export',
     'anomaly.csvName': 'frame-anomalies.csv',
+    'station.title': 'Substations',
+    'station.empty': 'No substations',
+    'station.fpsUnit': 'fps',
   },
 }

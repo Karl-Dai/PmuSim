@@ -33,10 +33,14 @@ function reconnectTarget(mode: "normal" | "skipCfg2") {
   };
 }
 
-const { latestData } = useCommLog();
-const { events } = useEventLog();
-const { fps } = useFrameRate();
-const { offsetMs } = useTimeOffset();
+const { latestOf } = useCommLog();
+const { entriesFor } = useEventLog();
+const { fpsOf } = useFrameRate();
+const { offsetOf } = useTimeOffset();
+
+const fps = computed(() => fpsOf(selectedIdcode.value));
+const offsetMs = computed(() => offsetOf(selectedIdcode.value));
+const selectedEvents = computed(() => entriesFor(selectedIdcode.value));
 // 偏差读数:带符号整数 ms；无样本显示「—」。正号显式加，负号由数字自带。
 const clockOffsetText = computed(() => {
   const v = offsetMs.value;
@@ -191,11 +195,15 @@ const stateLabel = computed(() => {
   if (!s) return "";
   return t(`state.${s}`);
 });
-const displayState = computed(() => (reconnect.reconnecting.value ? t("state.reconnecting") : stateLabel.value));
+const selectedReconnecting = computed(() => {
+  const dk = session.value?.dialKey;
+  return dk ? reconnect.reconnectingOf(dk) : false;
+});
+const displayState = computed(() => (selectedReconnecting.value ? t("state.reconnecting") : stateLabel.value));
 
 // 状态语义色：在线类绿、断开红、重连中琥珀、无会话不着色
 const stateClass = computed(() => {
-  if (reconnect.reconnecting.value) return "st-warn";
+  if (selectedReconnecting.value) return "st-warn";
   const s = session.value?.state;
   if (!s) return "";
   if (s === "disconnected") return "st-err";
@@ -208,7 +216,7 @@ const stateClass = computed(() => {
 // FRACSEC low 24 bits = sub-second count; high 8 bits = time quality
 // (currently dropped here — TODO #9 in docs/TODO.md will expose them).
 const latestTime = computed(() => {
-  const d = latestData.value?.data;
+  const d = latestOf(selectedIdcode.value);
   if (!d) return "—";
   const measRate = cfg.value?.measRate ?? 1_000_000;
   const ms = frameTimeMs(d.soc, d.fracsec, measRate);
@@ -249,21 +257,20 @@ async function startEverything() {
     if (Number.isFinite(hb) && hb > 0) {
       await invoke("set_heartbeat_interval", { seconds: hb });
     }
-    // 3. connect substation if not already
-    if (!session.value) {
-      const mgmt = parseInt(connMgmtPort.value);
+    // 3. 用当前表单值新增一个子站(已存在同 dialKey 则跳过 connect)
+    const host = connIp.value.trim();
+    const mgmt = parseInt(connMgmtPort.value);
+    const dialKey = `${host}:${mgmt}`;
+    const exists = sessions.get(dialKey) || [...sessions.values()].some((s) => s.dialKey === dialKey);
+    if (!exists) {
       const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
-      await invoke("connect_substation", { host: connIp.value.trim(), port: mgmt, dataPort: data });
+      await invoke("connect_substation", { host, port: mgmt, dataPort: data });
     }
-    // 4. auto handshake with the chosen PERIOD。hzToPeriod(0)=0 → 0Hz 选中时握手即带
-    // 非法 PERIOD=0（选中时已弹确认，此处不再二次确认）。
+    // 4. auto_handshake 用 dialKey 作占位 idcode(后端 resolve_peer_idcode 处理)
     const hz = parseFloat(rateHz.value);
     const periodVal: number | null = Number.isFinite(hz) ? hzToPeriod(hz) : null;
-    // We don't yet know the real idcode; auto_handshake resolves it from
-    // peer (host:port) so the placeholder works.
-    const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
-    await invoke("auto_handshake", { idcode: target, period: periodVal });
-    reconnect.arm(reconnectTarget("normal"));
+    await invoke("auto_handshake", { idcode: dialKey, period: periodVal });
+    reconnect.arm(dialKey, reconnectTarget("normal"));
   } catch (e) {
     pushToast(t("config.startFailed", { error: toastError(e) }), "error");
   } finally {
@@ -288,14 +295,16 @@ async function skipCfg2Connect() {
     if (Number.isFinite(hb) && hb > 0) {
       await invoke("set_heartbeat_interval", { seconds: hb });
     }
-    if (!session.value) {
-      const mgmt = parseInt(connMgmtPort.value);
+    const host = connIp.value.trim();
+    const mgmt = parseInt(connMgmtPort.value);
+    const dialKey = `${host}:${mgmt}`;
+    const exists = sessions.get(dialKey) || [...sessions.values()].some((s) => s.dialKey === dialKey);
+    if (!exists) {
       const data = protocol.value === "V3" ? parseInt(connDataPort.value) : undefined;
-      await invoke("connect_substation", { host: connIp.value.trim(), port: mgmt, dataPort: data });
+      await invoke("connect_substation", { host, port: mgmt, dataPort: data });
     }
-    const target = session.value?.idcode ?? `${connIp.value.trim()}:${connMgmtPort.value}`;
-    await invoke("skip_cfg2_open", { idcode: target });
-    reconnect.arm(reconnectTarget("skipCfg2"));
+    await invoke("skip_cfg2_open", { idcode: dialKey });
+    reconnect.arm(dialKey, reconnectTarget("skipCfg2"));
   } catch (e) {
     pushToast(t("config.startFailed", { error: toastError(e) }), "error");
   } finally {
@@ -309,7 +318,7 @@ async function stopEverything() {
   try {
     await invoke("stop_server");
     running.value = false;
-    reconnect.cancel();
+    reconnect.cancelAll();
   } catch (e) {
     pushToast(t("config.stopFailed", { error: toastError(e) }), "error");
   } finally {
@@ -460,7 +469,7 @@ watch(rateHz, async (v, old) => {
       </div>
 
       <div class="btn-grid">
-        <button class="btn" @click="startEverything" :disabled="busy || running"><span>{{ t("config.start") }}</span></button>
+        <button class="btn" @click="startEverything" :disabled="busy"><span>{{ t("config.start") }}</span></button>
         <button class="btn" @click="stopEverything" :disabled="busy || !running"><span>{{ t("config.stop") }}</span></button>
         <button class="btn btn-wide" @click="pauseData" :disabled="!session || session.state !== 'streaming'"><span>{{ t("config.pause") }}</span></button>
       </div>
@@ -478,11 +487,11 @@ watch(rateHz, async (v, old) => {
       <div class="panel-hd">{{ t("config.eventLog") }}</div>
       <div class="panel-bd log-bd">
         <div class="log-list">
-          <div v-for="(e, i) in events" :key="i" :class="['log-line', e.kind]">
+          <div v-for="(e, i) in selectedEvents" :key="i" :class="['log-line', e.kind]">
             <span class="log-time">{{ e.time }}</span>
             <span class="log-msg">{{ e.message }}</span>
           </div>
-          <div v-if="events.length === 0" class="log-empty">{{ t("config.noEvents") }}</div>
+          <div v-if="selectedEvents.length === 0" class="log-empty">{{ t("config.noEvents") }}</div>
         </div>
       </div>
     </section>

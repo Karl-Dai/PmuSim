@@ -18,39 +18,46 @@ describe("frameTimeMs (报文 SOC/FRACSEC → 毫秒)", () => {
   });
 });
 
-describe("useFrameRate 基于报文时间戳反推帧率", () => {
-  beforeEach(() => useFrameRate().reset());
+describe("useFrameRate 基于报文时间戳反推帧率(按 idcode)", () => {
+  beforeEach(() => {
+    const { reset } = useFrameRate();
+    reset("A");
+    reset("B");
+  });
 
   it("以最近 1 秒(报文时间)内的帧数为 fps", () => {
-    const { tick, fps } = useFrameRate();
-    // 100Hz：每帧报文时间间隔 10ms，0..1490ms 共 150 帧。
-    // 末帧 1490ms → cutoff=490ms，窗口保留 [490,1490] = 101 帧。
-    for (let i = 0; i < 150; i++) tick(i * 10);
-    expect(fps.value).toBe(101);
+    const { tick, fpsOf } = useFrameRate();
+    for (let i = 0; i < 150; i++) tick("A", i * 10);
+    expect(fpsOf("A")).toBe(101);
   });
 
-  it("超出 1000ms 窗口的旧帧被剔除", () => {
-    const { tick, fps } = useFrameRate();
-    tick(0);
-    tick(500);
-    tick(1500); // cutoff=500 → 剔除 0ms 帧，保留 500/1500
-    expect(fps.value).toBe(2);
+  it("两个子站各自独立计数,互不串台", () => {
+    const { tick, fpsOf } = useFrameRate();
+    for (let i = 0; i < 150; i++) tick("A", i * 10); // 101
+    tick("B", 0);
+    tick("B", 500);
+    expect(fpsOf("A")).toBe(101);
+    expect(fpsOf("B")).toBe(2);
   });
 
-  it("报文时间倒退(子站重启/校时/SOC回绕)时重置窗口，避免虚高", () => {
-    const { tick, fps } = useFrameRate();
-    tick(100_000);
-    tick(100_010);
-    tick(100_020); // fps=3
-    tick(5); // 时间大幅倒退 → 重置，仅保留当前帧
-    expect(fps.value).toBe(1);
+  it("报文时间倒退时重置该 idcode 窗口", () => {
+    const { tick, fpsOf } = useFrameRate();
+    tick("A", 100_000);
+    tick("A", 100_010);
+    tick("A", 5); // 倒退 → 仅保留当前帧
+    expect(fpsOf("A")).toBe(1);
   });
 
-  it("reset() 清零", () => {
-    const { tick, fps, reset } = useFrameRate();
-    tick(0);
-    tick(10);
-    reset();
-    expect(fps.value).toBe(0);
+  it("reset(idcode) 清零且不影响其他 idcode", () => {
+    const { tick, fpsOf, reset } = useFrameRate();
+    tick("A", 0);
+    tick("B", 0);
+    reset("A");
+    expect(fpsOf("A")).toBe(0);
+    expect(fpsOf("B")).toBe(1);
+  });
+
+  it("未知 idcode 读数为 0", () => {
+    expect(useFrameRate().fpsOf("nope")).toBe(0);
   });
 });

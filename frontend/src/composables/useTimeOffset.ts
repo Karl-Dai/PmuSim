@@ -1,24 +1,29 @@
-import { ref } from "vue";
+import { reactive } from "vue";
 
-// 报文时间与本机时钟的偏差(ms)滑动均值。每帧偏差由后端在接收时刻采样
-// (now − 报文时间戳)写入 DataInfo.local_offset_ms；这里保留最近 N 帧定长
-// 计数窗求均值，抹平逐帧网络抖动。正=报文滞后本地，负=报文超前本地。
-// 模块级单例：usePmuEvents 逐帧 tick、ConfigInfoPanel 读 offsetMs，共享同窗。
-
+// 报文时间与本机时钟偏差(ms)按 idcode 隔离的定长滑动均值。每帧偏差由后端
+// 采样写入 DataInfo.local_offset_ms。正=报文滞后本地,负=超前。
 const WINDOW = 50;
-const samples: number[] = [];
-const offsetMs = ref<number | null>(null);
+const windows = new Map<string, number[]>();
+const offsetMap = reactive(new Map<string, number | null>());
 
 export function useTimeOffset() {
-  function tick(ms: number) {
+  function tick(idcode: string, ms: number) {
+    let samples = windows.get(idcode);
+    if (!samples) {
+      samples = [];
+      windows.set(idcode, samples);
+    }
     samples.push(ms);
     if (samples.length > WINDOW) samples.shift();
     const sum = samples.reduce((a, b) => a + b, 0);
-    offsetMs.value = sum / samples.length;
+    offsetMap.set(idcode, sum / samples.length);
   }
-  function reset() {
-    samples.length = 0;
-    offsetMs.value = null;
+  function reset(idcode: string) {
+    windows.delete(idcode);
+    offsetMap.set(idcode, null);
   }
-  return { offsetMs, tick, reset };
+  function offsetOf(idcode: string): number | null {
+    return offsetMap.get(idcode) ?? null;
+  }
+  return { tick, reset, offsetOf };
 }

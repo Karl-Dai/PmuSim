@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useAnomalyLog } from "../composables/useAnomalyLog";
+import { useSessions } from "../composables/useSessions";
 import { useToast } from "../composables/useToast";
 import { useI18n } from "../i18n";
 import { buildCsv, droppedFrames, fracHex, kindI18nKey } from "../lib/anomaly";
@@ -11,10 +12,13 @@ import type { AnomalyEntry } from "../types";
 const { entries, clear, counts } = useAnomalyLog();
 const { push: pushToast } = useToast();
 const { t } = useI18n();
+const { selectedIdcode } = useSessions();
 
 const collapsed = ref(true);
 const filterKind = ref<string>("all");
-const filterStation = ref<string>("all");
+// 默认过滤到当前选中子站;选中切换时同步(用户手动改过下拉则尊重其选择直到再次切换)。
+const filterStation = ref<string>(selectedIdcode.value || "all");
+watch(selectedIdcode, (id) => { filterStation.value = id || "all"; });
 const expandedId = ref<number | null>(null);
 
 // 拖拽高度（展开态）。

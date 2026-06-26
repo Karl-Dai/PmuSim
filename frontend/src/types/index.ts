@@ -2,6 +2,8 @@ export interface SessionInfo {
   idcode: string;
   peerIp: string;
   state: "connecting" | "connected" | "cfg1_received" | "cfg2_sent" | "streaming" | "disconnected";
+  /** 拨号目标 `${host}:${mgmtPort}`,跨 re-key 稳定,用于按目标重连。 */
+  dialKey?: string;
 }
 
 export interface ConfigInfo {

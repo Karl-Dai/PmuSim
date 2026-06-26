@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save }));
 
 import AnomalyPanel from "../src/components/AnomalyPanel.vue";
 import { useAnomalyLog } from "../src/composables/useAnomalyLog";
+import { useSessions } from "../src/composables/useSessions";
 import type { PmuEvent } from "../src/types";
 
 function ev(over: Partial<Extract<PmuEvent, { type: "TimestampAnomaly" }>> = {}) {
@@ -26,6 +27,7 @@ function ev(over: Partial<Extract<PmuEvent, { type: "TimestampAnomaly" }>> = {})
 
 beforeEach(() => {
   useAnomalyLog().clear();
+  useSessions().clear();
   invoke.mockReset();
   save.mockReset();
 });
@@ -85,5 +87,20 @@ describe("AnomalyPanel", () => {
     const wrapper = mount(AnomalyPanel);
     await wrapper.find(".anomaly-header").trigger("click");
     expect(wrapper.find(".anomaly-row .col-dropped").text()).toContain("2");
+  });
+
+  it("默认只显示选中子站的异常", async () => {
+    const { push } = useAnomalyLog();
+    push(ev({ kind: "gap", idcode: "A" }));
+    push(ev({ kind: "gap", idcode: "B" }));
+    const { addSession, selectedIdcode } = useSessions();
+    addSession("A", "1.1.1.1", "1.1.1.1:8000");
+    selectedIdcode.value = "A";
+    const wrapper = mount(AnomalyPanel);
+    await wrapper.find(".anomaly-header").trigger("click");
+    const rows = wrapper.findAll(".anomaly-row");
+    const rowText = rows.map((r) => r.text());
+    expect(rowText.some((t) => t.includes("A"))).toBe(true);
+    expect(rowText.some((t) => t.includes("B"))).toBe(false);
   });
 });

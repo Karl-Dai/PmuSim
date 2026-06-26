@@ -7,6 +7,7 @@ import { reactive } from "vue";
 
 export interface EventLogEntry {
   time: string; // "YYYY/MM/DD HH:MM:SS"
+  idcode: string;
   message: string;
   kind: "info" | "error";
 }
@@ -21,12 +22,15 @@ function now(): string {
 }
 
 export function useEventLog() {
-  function push(message: string, kind: EventLogEntry["kind"] = "info") {
-    events.unshift({ time: now(), message, kind });
+  function push(idcode: string, message: string, kind: EventLogEntry["kind"] = "info") {
+    events.unshift({ time: now(), idcode, message, kind });
     if (events.length > MAX_ENTRIES) events.splice(MAX_ENTRIES);
+  }
+  function entriesFor(idcode: string): EventLogEntry[] {
+    return events.filter((e) => e.idcode === idcode || e.idcode === "");
   }
   function clear() {
     events.splice(0);
   }
-  return { events, push, clear };
+  return { events, push, entriesFor, clear };
 }

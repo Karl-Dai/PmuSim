@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { useToast } from "./composables/useToast";
+import StationListPanel from "./components/StationListPanel.vue";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
@@ -84,6 +85,7 @@ onMounted(async () => {
       </div>
     </div>
     <div class="content">
+      <StationListPanel />
       <ConfigInfoPanel />
       <DataTablePanel />
     </div>

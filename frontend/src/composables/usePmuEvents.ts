@@ -30,7 +30,7 @@ export const listenerReady: Promise<void> = new Promise((res) => {
 });
 
 export function usePmuEvents() {
-  const { sessions, addSession, updateState, removeSession, setConfig, configs } = useSessions();
+  const { sessions, addSession, setDialKey, updateState, removeSession, setConfig, configs } = useSessions();
   const reconnect = useReconnect();
   const { addData } = useCommLog();
   const { push: pushToast } = useToast();
@@ -39,73 +39,81 @@ export function usePmuEvents() {
   const { tick: tickOffset, reset: resetOffset } = useTimeOffset();
   const { push: pushAnomaly } = useAnomalyLog();
 
+  // 占位 SessionCreated 暂存的 dialKey,供紧随其后的真实 idcode SessionCreated 继承。
+  let pendingDialKey: string | null = null;
+
   function handle(payload: PmuEvent) {
     switch (payload.type) {
       case "SessionCreated":
-        addSession(payload.idcode, payload.peer_ip);
-        if (!payload.idcode.includes(":")) {
-          pushEvent(t("event.mgmtEstablished", { idcode: payload.idcode, ip: payload.peer_ip }));
+        if (payload.idcode.includes(":")) {
+          // 占位会话:占位 idcode 本身即 dialKey。
+          pendingDialKey = payload.idcode;
+          addSession(payload.idcode, payload.peer_ip, payload.idcode);
+        } else {
+          addSession(payload.idcode, payload.peer_ip, pendingDialKey ?? undefined);
+          pendingDialKey = null;
+          pushEvent(payload.idcode, t("event.mgmtEstablished", { idcode: payload.idcode, ip: payload.peer_ip }));
         }
         break;
       case "SessionDisconnected": {
-        const wasStreaming = sessions.get(payload.idcode)?.state === "streaming";
+        const s = sessions.get(payload.idcode);
+        const wasStreaming = s?.state === "streaming";
+        const dialKey = s?.dialKey;
         removeSession(payload.idcode);
         if (!payload.idcode.includes(":")) {
-          pushEvent(t("event.pipeDisconnected", { idcode: payload.idcode }));
-          reconnect.onDisconnect(wasStreaming);
+          pushEvent(payload.idcode, t("event.pipeDisconnected", { idcode: payload.idcode }));
         }
-        resetFrameRate();
-        resetOffset();
+        resetFrameRate(payload.idcode);
+        resetOffset(payload.idcode);
+        if (dialKey) reconnect.onDisconnect(dialKey, wasStreaming);
         break;
       }
       case "Cfg1Received":
         updateState(payload.idcode, "cfg1_received");
         setConfig(payload.idcode, payload.cfg);
-        pushEvent(t("event.cfg1Received", { analog: payload.cfg.annmr, digital: payload.cfg.dgnmr }));
+        pushEvent(payload.idcode, t("event.cfg1Received", { analog: payload.cfg.annmr, digital: payload.cfg.dgnmr }));
         break;
       case "Cfg2Sent":
         updateState(payload.idcode, "cfg2_sent");
-        pushEvent(t("event.cfg2Sent"));
+        pushEvent(payload.idcode, t("event.cfg2Sent"));
         break;
       case "Cfg2Skipped":
-        pushEvent(t("event.cfg2Skipped"), "info");
+        pushEvent(payload.idcode, t("event.cfg2Skipped"), "info");
         break;
       case "Cfg2Received":
         setConfig(payload.idcode, payload.cfg);
         break;
       case "StreamingStarted":
         updateState(payload.idcode, "streaming");
-        pushEvent(t("event.dataEstablished"));
+        pushEvent(payload.idcode, t("event.dataEstablished"));
         break;
       case "StreamingStopped":
         updateState(payload.idcode, "cfg2_sent");
-        pushEvent(t("event.dataPaused"));
-        resetFrameRate();
-        resetOffset();
+        pushEvent(payload.idcode, t("event.dataPaused"));
+        resetFrameRate(payload.idcode);
+        resetOffset(payload.idcode);
         break;
       case "DataFrame": {
         addData(payload.idcode, payload.data);
         // 用数据帧自带的 SOC/FRACSEC(报文时间)反推帧率，而非墙钟到达时间。
         // measRate 取该 idcode 的 CFG TIME_BASE，缺省 1e6。
         const measRate = configs.get(payload.idcode)?.measRate ?? 1_000_000;
-        tickFrameRate(frameTimeMs(payload.data.soc, payload.data.fracsec, measRate));
-        tickOffset(payload.data.local_offset_ms);
+        tickFrameRate(payload.idcode, frameTimeMs(payload.data.soc, payload.data.fracsec, measRate));
+        tickOffset(payload.idcode, payload.data.local_offset_ms);
         break;
       }
       case "RawFrame":
-        // The new UI does not render the raw-frame stream (a future hex
-        // viewer can re-attach to useCommLog). Until then, silently drop
-        // — buffering ~100 frames/s into a 1000-cap ring is just a 10s
-        // sliding window of hex strings nobody reads.
         break;
       case "HeartbeatTimeout": {
-        const wasStreaming = sessions.get(payload.idcode)?.state === "streaming";
+        const s = sessions.get(payload.idcode);
+        const wasStreaming = s?.state === "streaming";
+        const dialKey = s?.dialKey;
         pushToast(t("event.heartbeatTimeoutToast", { idcode: payload.idcode }), "error");
-        pushEvent(t("event.heartbeatTimeout", { idcode: payload.idcode }), "error");
+        pushEvent(payload.idcode, t("event.heartbeatTimeout", { idcode: payload.idcode }), "error");
         removeSession(payload.idcode);
-        resetFrameRate();
-        resetOffset();
-        reconnect.onDisconnect(wasStreaming);
+        resetFrameRate(payload.idcode);
+        resetOffset(payload.idcode);
+        if (dialKey) reconnect.onDisconnect(dialKey, wasStreaming);
         break;
       }
       case "TimestampAnomaly": {
@@ -124,7 +132,7 @@ export function usePmuEvents() {
       }
       case "Error":
         pushToast(payload.idcode ? `${payload.idcode}: ${payload.error}` : payload.error, "error");
-        pushEvent(payload.error, "error");
+        pushEvent(payload.idcode ?? "", payload.error, "error");
         break;
     }
   }

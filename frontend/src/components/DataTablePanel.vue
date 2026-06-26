@@ -3,10 +3,12 @@ import { computed, ref } from "vue";
 import { useSessions } from "../composables/useSessions";
 import { useCommLog } from "../composables/useCommLog";
 import { useI18n } from "../i18n";
+import { phasorMagAngle } from "../lib/phasor";
+import PhasorPlot from "./PhasorPlot.vue";
 
 const { t } = useI18n();
 const { selectedIdcode, configs } = useSessions();
-const { latestData } = useCommLog();
+const { latestOf } = useCommLog();
 // Stable key (e.g. "stat-0" / "an-3" / "dg-7") so reselection survives
 // CFG-2 reload or analog/digital count changes.
 const selectedKey = ref<string | null>(null);
@@ -28,7 +30,7 @@ interface DisplayRow {
 // STAT bit decoding per V3 §8.11 表 12; analog scale per §8.5 表 8 row 16
 // (raw × ANUNIT × 1e-5); digital bits per §8.6.
 const displayRows = computed<DisplayRow[]>(() => {
-  const data = latestData.value?.data;
+  const data = latestOf(selectedIdcode.value);
   const c = cfg.value;
   const rows: DisplayRow[] = [];
 
@@ -49,7 +51,28 @@ const displayRows = computed<DisplayRow[]>(() => {
     extra: "",
     tone: !has || (stat! & 0x0800) === 0 ? undefined : "warn" });
 
+  // 系统频率 / ROCOF —— 数据帧自带,作 STAT 区附加读数(不占数字序号)。
+  rows.push({ key: "freq", num: "—", name: t("data.freq"),
+    value: data ? `${data.freq.toFixed(3)} ${t("data.hzUnit")}` : "-", extra: "" });
+  rows.push({ key: "dfreq", num: "—", name: t("data.rocof"),
+    value: data ? data.dfreq.toFixed(4) : "-", extra: "" });
+
   if (!c) return rows;
+
+  // 相量行:format bit0 决定极/直角。名称取 channelNames[0..phnmr-1]。
+  const polar = (data?.format_flags ?? c.formatFlags) & 1 ? true : false;
+  for (let i = 0; i < c.phnmr; i++) {
+    const pair = data?.phasors[i];
+    const r = pair ? phasorMagAngle(pair, polar) : null;
+    rows.push({
+      key: `ph-${i}`,
+      num: String(5 + i).padStart(2, "0"),
+      name: c.channelNames[i] || `PH_${i + 1}`,
+      value: r ? `${r.mag.toFixed(3)} ∠ ${r.angleDeg.toFixed(2)}${t("data.angleUnit")}` : "-",
+      extra: t("data.phasor"),
+    });
+  }
+
 
   const analogStart = c.phnmr;
   for (let i = 0; i < c.annmr; i++) {
@@ -71,7 +94,7 @@ const displayRows = computed<DisplayRow[]>(() => {
       (v * factor).toFixed(3);
     rows.push({
       key: `an-${i}`,
-      num: String(5 + i).padStart(2, "0"),
+      num: String(5 + c.phnmr + i).padStart(2, "0"),
       name: c.channelNames[analogStart + i] || `AN_${i + 1}`,
       value,
       extra: String(raw ?? 0),
@@ -85,7 +108,7 @@ const displayRows = computed<DisplayRow[]>(() => {
     const value = word === undefined ? "-" : ((word >> (i % 16)) & 1 ? t("data.digitalOn") : t("data.digitalOff"));
     rows.push({
       key: `dg-${i}`,
-      num: String(5 + c.annmr + i).padStart(2, "0"),
+      num: String(5 + c.phnmr + c.annmr + i).padStart(2, "0"),
       name: c.channelNames[digitalStart + i] || `DG_${i + 1}`,
       value,
       extra: "",
@@ -97,7 +120,9 @@ const displayRows = computed<DisplayRow[]>(() => {
 </script>
 
 <template>
-  <div class="data-table-wrap">
+  <div class="data-pane">
+    <PhasorPlot />
+    <div class="data-table-wrap">
     <table class="data-table">
       <thead>
         <tr>
@@ -121,10 +146,12 @@ const displayRows = computed<DisplayRow[]>(() => {
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.data-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .data-table-wrap {
   flex: 1;
   overflow: auto;
