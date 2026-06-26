@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-27
+
+### Highlights / 亮点
+
+- 🌐 **主站多子站接收**:主站侧栏新增「子站列表」面板,同时接入多台子站,逐台显示 IDCODE / FPS / 连接状态 LED,点击切换聚焦子站;commLog / 配置 / 数据帧 / 帧率 / 时钟偏差 / 重连全部按子站隔离 / **Multi-substation receive on the master**: a new "Substations" side panel lists every connected substation with IDCODE, FPS and a status LED; click to focus one. CommLog, config, data frames, frame-rate, clock-offset and reconnect are all keyed per-substation.
+- 🧭 **相量可视化**:数据面板内嵌极坐标相量图,根据 CFG-2 的 `FORMAT` 位自动解析极坐标 / 直角坐标,逐通道画出相量幅值与角度;数据表新增系统频率 / ROCOF / 相量行 / **Phasor visualization**: a polar phasor plot embedded in the data panel decodes phasors per the CFG-2 `FORMAT` bit (polar vs rectangular) and draws magnitude + angle per channel; the data table gains frequency / ROCOF / phasor rows.
+- 🔁 **重连状态机多目标化**:`useReconnect` 由单一目标改为按 `dialKey`(host:port)隔离的多目标 FSM,每条客户端链路独立指数退避重连,断线 LED 即时变琥珀 / **Reconnect FSM goes multi-target**: `useReconnect` is now keyed by `dialKey` (host:port) instead of a single target — each client link retries with its own exponential backoff, and the LED turns amber the instant a link drops.
+- 🧪 **测试扩展**:前端新增子站列表 / 相量 / 多子站事件 / 重连多目标等用例,共 72 测试(18 文件)全绿;后端 88 测试全绿 / **Test coverage extended**: frontend gains station-list, phasor, multi-substation-event and multi-target-reconnect cases — 72 tests across 18 files all green; backend 88 tests all green.
+
+### Added 新增
+
+- 主站侧栏「子站列表」面板 `StationListPanel.vue`:逐子站 IDCODE / FPS / 状态 LED(绿=推流、琥珀=连接中或重连中、红=断开),点击切换聚焦子站;新增即自动选中最新连入子站,断开时回落到剩余任一会话 / Master side panel `StationListPanel.vue`: per-substation IDCODE / FPS / status LED (green = streaming, amber = connecting or reconnecting, red = disconnected); click to focus. The newest session is auto-selected, and on disconnect the focus falls back to any remaining session.
+- 数据面板相量图 `PhasorPlot.vue` + 纯函数 `lib/phasor.ts`(`computeVectors` / `phasorMagAngle`):按数据帧 `FORMAT` 位 0 自动判定极坐标 / 直角坐标,Canvas 绘制刻度盘 + 多通道相量箭头 / Data-panel phasor plot `PhasorPlot.vue` + pure helpers `lib/phasor.ts` (`computeVectors` / `phasorMagAngle`): polar vs rectangular auto-detected from data-frame `FORMAT` bit 0; Canvas draws the dial and one arrow per channel.
+- 数据表新增读数行:系统频率(`freq`)、频率变化率(`dfreq`),以及每个相量通道的「幅值 ∠ 角度」行;序号按 phnmr / annmr / dgnmr 正确排布 / Data table gains reading rows for system frequency (`freq`), rate-of-change (`dfreq`) and a magnitude∠angle row per phasor channel; row numbering correctly accounts for phnmr / annmr / dgnmr.
+- `SessionInfo` 新增 `dialKey`(host:port)字段,跨 placeholder→真实 IDCODE 的 re-key 稳定不变,作为重连与按目标隔离的稳定键 / `SessionInfo` gains a `dialKey` (host:port) field that survives the placeholder→real-IDCODE re-key, serving as the stable key for reconnect and per-target isolation.
+- i18n 新增 `station.*` 与 `data.phasor / freq / rocof` 等词条(中英) / i18n keys added for `station.*` and `data.phasor / freq / rocof` (zh + en).
+
+### Changed 改进
+
+- `useSessions` 由"首个会话即选中"改为"新增即选中最新",并在断开会话时自动回落到剩余任一会话,避免删除当前子站后焦点丢失 / `useSessions` switches from "select first" to "select newest on add" and falls back to any remaining session on removal, so deleting the focused substation no longer loses focus.
+- `useCommLog` / `useFrameRate` / `useTimeOffset` / `usePmuEvents` / `useReconnect` 全部由单一当前会话改为按 `idcode` / `dialKey` 取值,读数与计数严格按子站隔离 / `useCommLog` / `useFrameRate` / `useTimeOffset` / `usePmuEvents` / `useReconnect` all switch from a single current session to `idcode` / `dialKey`-keyed lookups, so readings and counts are strictly per-substation.
+- `useReconnect` 重写为多目标 FSM:`states: Map<dialKey, RState>` + `reconnectingKeys: Set`,每条客户端链路独立的指数退避(BASE 1s → MAX 30s)与 attempt 计数 / `useReconnect` rewritten as a multi-target FSM: `states: Map<dialKey, RState>` + `reconnectingKeys: Set`, each client link gets independent exponential backoff (BASE 1s → MAX 30s) and its own attempt counter.
+- `DataTablePanel` 相量行序号正确排布:模拟量序号从 `5 + phnmr` 起、数字量从 `5 + phnmr + annmr` 起,不再被相量行挤位 / `DataTablePanel` phasor-aware row numbering: analog rows start at `5 + phnmr`, digital rows at `5 + phnmr + annmr`, no longer displaced by phasor rows.
+
+### Tests 测试
+
+- 前端新增 / 扩写测试:`station-list-panel`、`phasor`(纯函数)、`phasor-plot`、`data-table-panel`(相量 + 序号)、`use-sessions`、`use-pmu-events.multi`、`use-reconnect`(多目标)、`use-comm-log`、`use-event-log`、`use-frame-rate`、`use-time-offset` 等;全量 **72 测试 / 18 文件 0 失败**,后端 **88 测试 0 失败** / Frontend tests added/extended: `station-list-panel`, `phasor` (pure), `phasor-plot`, `data-table-panel` (phasor + numbering), `use-sessions`, `use-pmu-events.multi`, `use-reconnect` (multi-target), `use-comm-log`, `use-event-log`, `use-frame-rate`, `use-time-offset`, etc.; **72 tests / 18 files / 0 failures**, backend **88 tests / 0 failures**.
+
 ## [0.11.0] - 2026-06-25
 
 ### Highlights / 亮点

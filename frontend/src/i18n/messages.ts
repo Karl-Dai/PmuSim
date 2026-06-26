@@ -215,6 +215,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     'data.empty': 'Channel list appears once CFG-2 arrives after connecting',
     'data.digitalOn': 'Closed',
     'data.digitalOff': 'Open',
+    'data.phasor': 'Phasor',
+    'data.freq': 'System frequency',
+    'data.rocof': 'Rate of change',
+    'data.angleUnit': '°',
+    'data.hzUnit': 'Hz',
     // STAT decode
     'stat.dataValid': 'Data Valid',
     'stat.deviceStatus': 'Device Status',
