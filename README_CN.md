@@ -30,6 +30,8 @@
 
 - 📡 **两个规约版本共用一个二进制** — Q/GDW 131-2006 (V2) 与 GB/T 26865.2-2011 (V3),帧格式与端口差异都已对齐。
 - 🤝 **TCP 角色按规约正确** — 管理通道主站作 client;V3 数据通道主站作 client,V2 数据通道主站作 server。
+- 🌐 **多子站同时接入** — 主站可同时接入多台子站,侧栏按 IDCODE / FPS / 状态 LED 列出,点击切换聚焦;通信日志 / 配置 / 数据帧 / 帧率 / 时钟偏差 / 重连全部按子站隔离。
+- 🧭 **相量可视化** — 数据面板内嵌极坐标相量图,按 CFG-2 FORMAT 位自动解析极/直角坐标,逐通道实时画出幅值与角度;数据表新增系统频率、ROCOF 及每个相量通道的读数行。
 - ⚡ **一键握手** — `CFG-1 → CFG-2 命令 → CFG-2 → 召唤 CFG-2 → 启动数据`,带 ACK/NACK 等待,全流程自动化。
 - 🔄 **应用内自动更新** — ed25519 签名安装包,4 路 endpoint 回退(国内 3 个镜像 + GitHub)。
 - 🪶 **小体积原生** — Rust + Tauri 2;没 JVM、没 Python runtime、没 Electron。
@@ -200,10 +202,6 @@ cd ../crates/pmusim-sub && cargo tauri dev
 
 - **V3**: 主站管理目标 → `127.0.0.1 : 8000`
 - **V2**: 主站管理目标 → `127.0.0.1 : 7000`; 主站数据本地侦听端口 → `7001`
-
-## 更新日志
-
-完整历史见 [CHANGELOG.md](CHANGELOG.md),签名安装包和 updater manifest 见 [Releases 页面](https://github.com/Karl-Dai/PmuSim/releases)。
 
 ## macOS 首次启动
 

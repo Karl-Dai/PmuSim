@@ -30,6 +30,8 @@ Testing a PMU master is usually one of two pains: borrow a real substation, or r
 
 - 📡 **Two protocol revisions, one binary** — Q/GDW 131-2006 (V2) and GB/T 26865.2-2011 (V3), wire-format and port quirks included.
 - 🤝 **Correct TCP roles per spec** — mgmt pipe master-as-client; V3 data pipe master-as-client; V2 data pipe master-as-server.
+- 🌐 **Multi-substation at once** — the master accepts several substations simultaneously; a side panel lists each by IDCODE / FPS / status LED, click to focus, and commLog / config / data frames / frame-rate / clock-offset / reconnect are all keyed per-substation.
+- 🧭 **Phasor visualization** — a polar phasor plot embedded in the data panel decodes each channel per the CFG-2 FORMAT bit (polar vs rectangular) and draws magnitude + angle live; the data table gains system frequency, ROCOF and per-phasor rows.
 - ⚡ **One-click handshake** — `CFG-1 → CFG-2 command → CFG-2 → Request CFG-2 → Open Data`, automated end-to-end with ACK/NACK waits.
 - 🔄 **In-app auto-update** — ed25519-signed bundles, 4-way endpoint fallback (3 China proxies + GitHub).
 - 🪶 **Small native binary** — Rust + Tauri 2; no JVM, no Python runtime, no Electron.
@@ -200,10 +202,6 @@ cd ../crates/pmusim-sub && cargo tauri dev
 
 - **V3**: master mgmt target → `127.0.0.1 : 8000`
 - **V2**: master mgmt target → `127.0.0.1 : 7000`; master data-listen port → `7001`
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for full history, or the [Releases page](https://github.com/Karl-Dai/PmuSim/releases) for signed installers and updater manifests.
 
 ## macOS First Launch
 
