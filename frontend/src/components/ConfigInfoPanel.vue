@@ -36,18 +36,22 @@ function reconnectTarget(mode: "normal" | "skipCfg2") {
 const { latestOf } = useCommLog();
 const { entriesFor } = useEventLog();
 const { fpsOf } = useFrameRate();
-const { offsetOf } = useTimeOffset();
+const { offsetOf, maxOf, minOf } = useTimeOffset();
 
 const fps = computed(() => fpsOf(selectedIdcode.value));
 const offsetMs = computed(() => offsetOf(selectedIdcode.value));
+const maxMs = computed(() => maxOf(selectedIdcode.value));
+const minMs = computed(() => minOf(selectedIdcode.value));
 const selectedEvents = computed(() => entriesFor(selectedIdcode.value));
 // 偏差读数:带符号整数 ms；无样本显示「—」。正号显式加，负号由数字自带。
-const clockOffsetText = computed(() => {
-  const v = offsetMs.value;
+function fmtSignedMs(v: number | null): string {
   if (v === null) return "—";
   const r = Math.round(v);
   return (r > 0 ? "+" : "") + r;
-});
+}
+const clockOffsetText = computed(() => fmtSignedMs(offsetMs.value));
+const maxLatencyText = computed(() => fmtSignedMs(maxMs.value));
+const minLatencyText = computed(() => fmtSignedMs(minMs.value));
 const { push: pushToast } = useToast();
 
 // Debounce select changes so holding ↑/↓ doesn't fire one invoke per tick
@@ -479,6 +483,8 @@ watch(rateHz, async (v, old) => {
         <div class="rd-row"><label>{{ t("config.latestTime") }}</label><span class="rd-val mono">{{ latestTime }}</span></div>
         <div class="rd-row"><label>{{ t("config.uploadRate") }}</label><span class="rd-val mono">{{ fps }} <span class="unit">{{ t("config.fpsUnit") }}</span></span></div>
         <div class="rd-row"><label>{{ t("config.clockOffset") }}</label><span class="rd-val mono">{{ clockOffsetText }}<span v-if="offsetMs !== null" class="unit">{{ t("config.msUnit") }}</span></span></div>
+        <div class="rd-row"><label>{{ t("config.maxLatency") }}</label><span class="rd-val mono">{{ maxLatencyText }}<span v-if="maxMs !== null" class="unit">{{ t("config.msUnit") }}</span></span></div>
+        <div class="rd-row"><label>{{ t("config.minLatency") }}</label><span class="rd-val mono">{{ minLatencyText }}<span v-if="minMs !== null" class="unit">{{ t("config.msUnit") }}</span></span></div>
       </div>
       </div>
     </section>
