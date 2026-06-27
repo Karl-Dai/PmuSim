@@ -33,6 +33,9 @@ Testing a PMU master is usually one of two pains: borrow a real substation, or r
 - 🌐 **Multi-substation at once** — the master accepts several substations simultaneously; a side panel lists each by IDCODE / FPS / status LED, click to focus, and commLog / config / data frames / frame-rate / clock-offset / reconnect are all keyed per-substation.
 - 🧭 **Phasor visualization** — a polar phasor plot embedded in the data panel decodes each channel per the CFG-2 FORMAT bit (polar vs rectangular) and draws magnitude + angle live; the data table gains system frequency, ROCOF and per-phasor rows.
 - ⚡ **One-click handshake** — `CFG-1 → CFG-2 command → CFG-2 → Request CFG-2 → Open Data`, automated end-to-end with ACK/NACK waits.
+- 🚨 **Frame anomaly monitor** — timestamp anomalies (backward / gap / stall) are split out of the event log into a dedicated bottom panel with per-type/station filters, count badges, CSV export and expandable row details.
+- 🔁 **Auto-reconnect** — when the master dials a substation as a client and the link drops, each target retries independently with exponential backoff; no manual reconnect.
+- ⏱️ **Clock-offset readout** — a live offset between each data frame's SOC/FRACSEC and the local wall clock surfaces substation time drift at a glance.
 - 🔄 **In-app auto-update** — ed25519-signed bundles, 4-way endpoint fallback (3 China proxies + GitHub).
 - 🪶 **Small native binary** — Rust + Tauri 2; no JVM, no Python runtime, no Electron.
 
