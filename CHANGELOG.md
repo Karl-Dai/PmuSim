@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-29
+
+### Highlights / 亮点
+
+- 📊 **主站时标延迟极值读数**:读数面板在「本地时间偏差」下新增「最大时标延迟」「最小时标延迟」两行,复用 50 帧滑动窗口样本取 max/min,一眼看到报文时间戳相对本机时钟的峰值偏移 / **Master timestamp-latency extremes**: the readout panel gains "Max latency" and "Min latency" rows beneath "Clock offset", reusing the 50-frame sliding-window samples to surface peak frame-timestamp deviation from the local clock at a glance.
+
+### Added 新增
+
+- `useTimeOffset` 在原 50 帧均值窗口上新增 `maxMap` / `minMap` 与 `maxOf` / `minOf` 访问器;极值样本被滑出窗口时重扫重算,均摊 O(1) / `useTimeOffset` adds `maxMap` / `minMap` and `maxOf` / `minOf` accessors alongside the existing 50-frame mean window; evicted extremes trigger a window rescan, amortized O(1).
+- `ConfigInfoPanel` 读数面板新增「最大时标延迟」「最小时标延迟」两行,格式复用抽出的 `fmtSignedMs` 纯函数(带符号整数 ms,无样本显示「—」) / `ConfigInfoPanel` readout panel adds "Max latency" and "Min latency" rows, formatted via an extracted `fmtSignedMs` pure helper (signed-integer ms, `—` when no sample).
+- i18n 新增 `config.maxLatency` / `config.minLatency`(中英) / i18n keys `config.maxLatency` / `config.minLatency` added (zh + en).
+
+### Tests 测试
+
+- `use-time-offset.test.ts` 新增 5 个用例(max/min 更新、极值滑出重扫、两子站隔离、reset 归 null),前端共 77 测试(18 文件)全绿 / `use-time-offset.test.ts` gains 5 cases (max/min update, evicted-extreme rescan, two-substation isolation, reset-to-null); frontend now 77 tests across 18 files, all green.
+
 ## [0.12.0] - 2026-06-27
 
 ### Highlights / 亮点
