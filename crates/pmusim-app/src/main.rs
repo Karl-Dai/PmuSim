@@ -21,7 +21,6 @@ fn main() {
             commands::set_heartbeat_interval,
             commands::poll_events,
             commands::open_url,
-            commands::save_text_file,
             update::check_for_update,
             update::install_update,
             update::snooze_update,

@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { ref, reactive } from "vue";
 import type { DataInfo } from "../types";
 
 export interface LogEntry {
@@ -10,7 +10,7 @@ export interface LogEntry {
 }
 
 const logs = reactive<LogEntry[]>([]);
-const latestByIdcode = reactive(new Map<string, DataInfo>());
+const latestData = ref<{ idcode: string; data: DataInfo } | null>(null);
 const MAX_LOGS = 1000;
 
 export function useCommLog() {
@@ -22,17 +22,13 @@ export function useCommLog() {
   }
 
   function addData(idcode: string, data: DataInfo) {
-    latestByIdcode.set(idcode, data);
-  }
-
-  function latestOf(idcode: string): DataInfo | undefined {
-    return latestByIdcode.get(idcode);
+    latestData.value = { idcode, data };
   }
 
   function clear() {
     logs.splice(0);
-    latestByIdcode.clear();
+    latestData.value = null;
   }
 
-  return { logs, addLog, addData, latestOf, clear };
+  return { logs, latestData, addLog, addData, clear };
 }

@@ -15,8 +15,8 @@ use pmusim_core::protocol::constants::{
 };
 use pmusim_core::protocol::frame::{CommandFrame, ConfigFrame, DataFrame, Frame};
 use pmusim_core::protocol::parser::parse;
-use pmusim_core::time_utils::{current_soc, frame_abs_ms, now_unix_ms, soc_to_beijing};
-use pmusim_core::ts_monitor::{TimestampMonitor, TsAnomalyKind};
+use pmusim_core::time_utils::{current_soc, soc_to_beijing};
+use pmusim_core::ts_monitor::{TimestampMonitor, TsReport};
 use crate::events::{ConfigInfo, DataInfo, PmuEvent};
 
 /// Async event sink. Tauri side forwards these to `emit("pmu-event", ...)`;
@@ -363,13 +363,11 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
-                        let local_offset_ms = now_unix_ms()
-                            - frame_abs_ms(df.soc, df.fracsec, cfg2.meas_rate, df.version as u8);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
-                                data: data_frame_to_info(&df, local_offset_ms),
+                                data: data_frame_to_info(&df),
                             },
                         );
                     }
@@ -389,13 +387,11 @@ impl MasterStation {
                 if let Some(cfg2) = &session.cfg2 {
                     if let Ok(Frame::Data(df)) = parse(&frame_data, cfg2.format_flags, cfg2.phnmr, cfg2.annmr, cfg2.dgnmr) {
                         check_frame_timestamp(&mut ts_monitor, &df, cfg2.period_ms(), cfg2.meas_rate, &event_tx, &session_idcode);
-                        let local_offset_ms = now_unix_ms()
-                            - frame_abs_ms(df.soc, df.fracsec, cfg2.meas_rate, df.version as u8);
                         emit_event(
                             &event_tx,
                             PmuEvent::DataFrame {
                                 idcode: session_idcode.clone(),
-                                data: data_frame_to_info(&df, local_offset_ms),
+                                data: data_frame_to_info(&df),
                             },
                         );
                     }
@@ -936,13 +932,11 @@ impl MasterStation {
                     }
                 }
 
-                let local_offset_ms = now_unix_ms()
-                    - frame_abs_ms(df.soc, df.fracsec, ts_params.map(|(_, mr)| mr).unwrap_or(0), df.version as u8);
                 emit_event(
                     &event_tx,
                     PmuEvent::DataFrame {
                         idcode: idcode.clone(),
-                        data: data_frame_to_info(&df, local_offset_ms),
+                        data: data_frame_to_info(&df),
                     },
                 );
             }
@@ -1821,7 +1815,7 @@ fn hex_encode(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame, local_offset_ms: f64) -> DataInfo {
+fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame) -> DataInfo {
     DataInfo {
         soc: df.soc,
         fracsec: df.fracsec,
@@ -1833,7 +1827,6 @@ fn data_frame_to_info(df: &pmusim_core::protocol::frame::DataFrame, local_offset
         analog: df.analog.clone(),
         digital: df.digital.clone(),
         phasors: df.phasors.clone(),
-        local_offset_ms,
     }
 }
 
@@ -1843,7 +1836,8 @@ fn emit_event(event_tx: &EventSender, event: PmuEvent) {
     }
 }
 
-/// 逐帧喂入时间戳监视器，异常则把结构化报文曝给前端。
+/// 数据帧时间戳错乱检测。把本帧 SOC/FRACSEC 喂给该连接的 monitor，
+/// 若不按预期间隔递增(回退/跳变/停滞)，复用 Error 事件把异常报文曝给前端。
 fn check_frame_timestamp(
     monitor: &mut TimestampMonitor,
     df: &DataFrame,
@@ -1855,56 +1849,22 @@ fn check_frame_timestamp(
     if let Some(r) = monitor.feed(df.soc, df.fracsec, df.version as u8, meas_rate, period_ms) {
         emit_event(
             event_tx,
-            PmuEvent::TimestampAnomaly {
+            PmuEvent::Error {
                 idcode: idcode.to_string(),
-                kind: anomaly_code(r.kind).to_string(),
-                expected_ms: r.expected_ms,
-                actual_ms: r.actual_ms,
-                soc: r.soc,
-                fracsec: r.fracsec,
-                frame_time: soc_to_beijing(r.soc),
+                error: format_ts_anomaly(&r),
             },
         );
     }
 }
 
-/// TsAnomalyKind → 前端 code（不在 pmusim-core 加 serde，保持 core 纯逻辑）。
-fn anomaly_code(kind: TsAnomalyKind) -> &'static str {
-    match kind {
-        TsAnomalyKind::Backward => "backward",
-        TsAnomalyKind::Gap => "gap",
-        TsAnomalyKind::Stall => "stall",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pmusim_core::protocol::constants::ProtocolVersion;
-    use pmusim_core::protocol::frame::DataFrame;
-
-    fn sample_df() -> DataFrame {
-        DataFrame {
-            version: ProtocolVersion::V2,
-            idcode: "TEST".into(),
-            soc: 100,
-            fracsec: 0,
-            stat: 0,
-            format_flags: 0,
-            phasors: vec![],
-            freq: 0.0,
-            dfreq: 0.0,
-            analog: vec![],
-            digital: vec![],
-        }
-    }
-
-    #[test]
-    fn data_frame_to_info_carries_offset() {
-        // 偏差作为参数传入，应原样落入 DataInfo（确定性，不依赖时钟）。
-        let df = sample_df();
-        let info = data_frame_to_info(&df, 123.5);
-        assert_eq!(info.local_offset_ms, 123.5);
-        assert_eq!(info.soc, 100);
-    }
+fn format_ts_anomaly(r: &TsReport) -> String {
+    format!(
+        "时间戳错乱[{}]: 预期 {:.1}ms 实际 {:.1}ms | SOC={} ({}) FRACSEC=0x{:08x}",
+        r.kind.label(),
+        r.expected_ms,
+        r.actual_ms,
+        r.soc,
+        soc_to_beijing(r.soc),
+        r.fracsec,
+    )
 }

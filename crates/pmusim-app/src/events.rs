@@ -15,18 +15,6 @@ pub enum PmuEvent {
     RawFrame { idcode: String, direction: String, hex: String },
     HeartbeatTimeout { idcode: String },
     Error { idcode: String, error: String },
-    TimestampAnomaly {
-        idcode: String,
-        /// "backward" | "gap" | "stall"
-        kind: String,
-        expected_ms: f64,
-        /// 回退时为负
-        actual_ms: f64,
-        soc: u32,
-        fracsec: u32,
-        /// soc_to_beijing(soc) 算好的北京时间字符串
-        frame_time: String,
-    },
 }
 
 // Match the TypeScript ConfigInfo type (camelCase). Without this rename,
@@ -64,9 +52,6 @@ pub struct DataInfo {
     pub analog: Vec<f64>,
     pub digital: Vec<u16>,
     pub phasors: Vec<(f64, f64)>,
-    /// 接收时刻本机时钟与本帧报文时间戳之差(ms)：now − 报文时间。
-    /// 正=报文滞后本地，负=报文超前本地。仅展示用，不参与编码。
-    pub local_offset_ms: f64,
 }
 
 impl From<&pmusim_core::protocol::frame::ConfigFrame> for ConfigInfo {

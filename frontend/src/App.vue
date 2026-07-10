@@ -3,11 +3,9 @@ import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { useToast } from "./composables/useToast";
-import StationListPanel from "./components/StationListPanel.vue";
 import ConfigInfoPanel from "./components/ConfigInfoPanel.vue";
 import DataTablePanel from "./components/DataTablePanel.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
-import AnomalyPanel from "./components/AnomalyPanel.vue";
 import { useI18n } from "./i18n";
 
 // PMU event listener is attached in main.ts BEFORE this component mounts
@@ -85,12 +83,9 @@ onMounted(async () => {
       </div>
     </div>
     <div class="content">
-      <StationListPanel />
       <ConfigInfoPanel />
       <DataTablePanel />
     </div>
-
-    <AnomalyPanel />
 
     <div class="toasts" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" :class="['toast', `toast-${t.kind}`]" @click="dismiss(t.id)">

@@ -49,3 +49,5 @@ frontend-sub/node_modules
 .playwright-mcp/
 .claude/worktrees/
 .worktrees/
+scripts/node_modules/
+RELEASE_BODY.md

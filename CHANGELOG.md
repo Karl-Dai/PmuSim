@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-10
+
+### Highlights / 亮点
+
+- ⏪ **主站回退到时标偏移检测引入前的稳定产品状态**:移除报文时标与本机时钟的偏移读数及滑动窗口极值,避免在本版本继续采集或展示该类数据 / **Master rolled back to the stable product state before local clock-offset monitoring**: removes the frame-time versus local-clock readout and its sliding-window extrema, so this release no longer collects or displays those measurements.
+- 🧹 **同步撤销后续依赖功能**:移除结构化异常报文面板、多子站会话面板与相量极坐标图,界面和会话模型恢复为单子站流程 / **Dependent follow-up features are rolled back together**: removes the structured anomaly panel, multi-substation session UI, and polar phasor plot, restoring the single-substation workflow.
+- 🛡️ **保留基础异常检测与自动重连**:数据帧回退 / 跳变 / 停滞仍通过事件与 toast 暴露,主站客户端链路断开后仍会自动重连 / **Core anomaly detection and auto-reconnect remain**: backward, gap, and stalled timestamps still surface through events and toasts, and client-mode links still reconnect automatically.
+- 🧪 **回退基线通过完整验证**:前端 26 个单元测试与 Rust 83 个测试全部通过 / **Rollback baseline fully verified**: all 26 frontend unit tests and 83 Rust tests pass.
+
+### Removed 移除
+
+- 移除 `local_offset_ms` 数据链路、`useTimeOffset` 50 帧窗口、本地时间偏差及最大 / 最小时标延迟读数 / Removed the `local_offset_ms` data path, the 50-frame `useTimeOffset` window, and the clock-offset plus max/min timestamp-latency readouts.
+- 移除 `AnomalyPanel` 结构化异常报文面板、CSV 导出及其状态层;时间戳异常恢复通过原有 `Error` 事件呈现 / Removed the structured `AnomalyPanel`, CSV export, and related state; timestamp anomalies return to the existing `Error` event presentation.
+- 移除多子站列表、按 `idcode` / `dialKey` 隔离的多会话状态与多目标重连;恢复单当前会话 / Removed the multi-substation list, per-`idcode` / `dialKey` state isolation, and multi-target reconnect; restored a single active session.
+- 移除相量极坐标图与新增的相量 / 频率 / ROCOF 数据行 / Removed the polar phasor visualization and the added phasor, frequency, and ROCOF rows.
+
+### Changed 改进
+
+- 主站产品代码恢复到提交 `a0c0c5c` 的功能基线,但保留 `v0.11.0` 至 `v0.12.1` 的完整发布历史供追溯 / Restored product code to the functional baseline at commit `a0c0c5c` while retaining the complete `v0.11.0` through `v0.12.1` release history for traceability.
+
+### Tests 测试
+
+- 前端 Vitest:5 个测试文件、26 个用例通过;主站前端生产构建通过 / Frontend Vitest: 5 files and 26 cases pass; the master frontend production build also succeeds.
+- Rust 工作区:83 个测试通过(11 个端到端场景 + 72 个库测试),0 失败 / Rust workspace: 83 tests pass (11 end-to-end scenarios plus 72 library tests), with 0 failures.
+- 发布说明生成器新增 3 个回归用例,覆盖版本章节边界、主 / 子站资产名与缺失章节告警 / Added 3 release-notes generator regressions covering section boundaries, master/substation asset names, and missing-section warnings.
+
 ## [0.12.1] - 2026-06-29
 
 ### Highlights / 亮点

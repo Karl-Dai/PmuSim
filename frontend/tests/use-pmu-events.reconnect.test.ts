@@ -22,34 +22,33 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function seedSession(idcode: string, state: string, dialKey?: string) {
+function seedSession(idcode: string, state: string) {
   const { sessions } = useSessions();
-  sessions.set(idcode, { idcode, peerIp: "1.1.1.1", state: state as never, dialKey });
+  sessions.set(idcode, { idcode, peerIp: "1.1.1.1", state: state as never });
 }
 
 describe("usePmuEvents 断线触发自动重连", () => {
-  it("真实会话 SessionDisconnected(streaming) → onDisconnect(dialKey,true)", async () => {
+  it("真实会话 SessionDisconnected(streaming) → onDisconnect(true)", async () => {
     const spy = vi.spyOn(reconnect, "onDisconnect");
-    seedSession("PMU1", "streaming", "1.1.1.1:8000");
+    seedSession("PMU1", "streaming");
     invoke.mockResolvedValueOnce([{ type: "SessionDisconnected", idcode: "PMU1" }]).mockResolvedValue([]);
     usePmuEvents().startListening();
     await vi.advanceTimersByTimeAsync(120);
-    expect(spy).toHaveBeenCalledWith("1.1.1.1:8000", true);
+    expect(spy).toHaveBeenCalledWith(true);
   });
 
-  it("HeartbeatTimeout(非 streaming) → onDisconnect(dialKey,false)", async () => {
+  it("HeartbeatTimeout(非 streaming) → onDisconnect(false)", async () => {
     const spy = vi.spyOn(reconnect, "onDisconnect");
-    seedSession("PMU1", "cfg2_sent", "1.1.1.1:8000");
+    seedSession("PMU1", "cfg2_sent");
     invoke.mockResolvedValueOnce([{ type: "HeartbeatTimeout", idcode: "PMU1" }]).mockResolvedValue([]);
     usePmuEvents().startListening();
     await vi.advanceTimersByTimeAsync(120);
-    expect(spy).toHaveBeenCalledWith("1.1.1.1:8000", false);
+    expect(spy).toHaveBeenCalledWith(false);
   });
 
-  it("无 dialKey 的会话断开不触发重连", async () => {
+  it("placeholder(host:port)SessionDisconnected 不触发重连", async () => {
     const spy = vi.spyOn(reconnect, "onDisconnect");
-    seedSession("PMU1", "streaming"); // 无 dialKey
-    invoke.mockResolvedValueOnce([{ type: "SessionDisconnected", idcode: "PMU1" }]).mockResolvedValue([]);
+    invoke.mockResolvedValueOnce([{ type: "SessionDisconnected", idcode: "10.0.0.1:8000" }]).mockResolvedValue([]);
     usePmuEvents().startListening();
     await vi.advanceTimersByTimeAsync(120);
     expect(spy).not.toHaveBeenCalled();
