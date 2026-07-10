@@ -55,11 +55,8 @@ async function attemptReconnect(): Promise<void> {
         await invoke("auto_handshake", { idcode, period: t.period });
       }
     }
-    attempt = 0;
-    reconnecting.value = false;
   } catch {
-    attempt += 1;
-    scheduleRetry();
+    onAttemptFailed();
   }
 }
 
@@ -71,22 +68,45 @@ function scheduleRetry(): void {
 }
 
 function arm(t: ReconnectTarget): void {
+  clearTimer();
   desired = t;
   intentional = false;
   attempt = 0;
+  pendingStreaming = false;
+  reconnecting.value = false;
 }
 
 function onDisconnect(wasStreaming: boolean): void {
   if (intentional || !desired) return;
-  pendingStreaming = wasStreaming;
+  pendingStreaming = pendingStreaming || wasStreaming;
   reconnecting.value = true;
   scheduleRetry();
+}
+
+// Tauri invoke only confirms that the backend command was queued. The actual
+// TCP result arrives later as SessionCreated/SessionDisconnected events.
+function onAttemptFailed(): void {
+  if (intentional || !desired || !reconnecting.value) return;
+  attempt += 1;
+  scheduleRetry();
+}
+
+function onConnected(streaming: boolean): void {
+  if (!reconnecting.value) return;
+  // Re-key emits placeholder-disconnected immediately before real-session-created.
+  // Cancel the retry scheduled by the placeholder event while the handshake continues.
+  clearTimer();
+  if (pendingStreaming && !streaming) return;
+  attempt = 0;
+  pendingStreaming = false;
+  reconnecting.value = false;
 }
 
 function cancel(): void {
   intentional = true;
   clearTimer();
   attempt = 0;
+  pendingStreaming = false;
   reconnecting.value = false;
 }
 
@@ -99,7 +119,7 @@ function _resetForTest(): void {
   reconnecting.value = false;
 }
 
-const api = { reconnecting, arm, onDisconnect, cancel, _resetForTest };
+const api = { reconnecting, arm, onDisconnect, onAttemptFailed, onConnected, cancel, _resetForTest };
 
 export function useReconnect() {
   return api;

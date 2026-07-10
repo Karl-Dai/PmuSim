@@ -25,10 +25,14 @@ export function useCommLog() {
     latestData.value = { idcode, data };
   }
 
+  function clearData(idcode?: string) {
+    if (!idcode || latestData.value?.idcode === idcode) latestData.value = null;
+  }
+
   function clear() {
     logs.splice(0);
     latestData.value = null;
   }
 
-  return { logs, latestData, addLog, addData, clear };
+  return { logs, latestData, addLog, addData, clearData, clear };
 }

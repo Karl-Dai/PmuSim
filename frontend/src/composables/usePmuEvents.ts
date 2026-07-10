@@ -29,7 +29,7 @@ export const listenerReady: Promise<void> = new Promise((res) => {
 export function usePmuEvents() {
   const { sessions, addSession, updateState, removeSession, setConfig, configs } = useSessions();
   const reconnect = useReconnect();
-  const { addData } = useCommLog();
+  const { addData, clearData } = useCommLog();
   const { push: pushToast } = useToast();
   const { push: pushEvent } = useEventLog();
   const { tick: tickFrameRate, reset: resetFrameRate } = useFrameRate();
@@ -39,13 +39,17 @@ export function usePmuEvents() {
       case "SessionCreated":
         addSession(payload.idcode, payload.peer_ip);
         if (!payload.idcode.includes(":")) {
+          reconnect.onConnected(false);
           pushEvent(t("event.mgmtEstablished", { idcode: payload.idcode, ip: payload.peer_ip }));
         }
         break;
       case "SessionDisconnected": {
         const wasStreaming = sessions.get(payload.idcode)?.state === "streaming";
         removeSession(payload.idcode);
-        if (!payload.idcode.includes(":")) {
+        if (payload.idcode.includes(":")) {
+          reconnect.onAttemptFailed();
+        } else {
+          clearData(payload.idcode);
           pushEvent(t("event.pipeDisconnected", { idcode: payload.idcode }));
           reconnect.onDisconnect(wasStreaming);
         }
@@ -69,6 +73,7 @@ export function usePmuEvents() {
         break;
       case "StreamingStarted":
         updateState(payload.idcode, "streaming");
+        reconnect.onConnected(true);
         pushEvent(t("event.dataEstablished"));
         break;
       case "StreamingStopped":
@@ -95,8 +100,23 @@ export function usePmuEvents() {
         pushToast(t("event.heartbeatTimeoutToast", { idcode: payload.idcode }), "error");
         pushEvent(t("event.heartbeatTimeout", { idcode: payload.idcode }), "error");
         removeSession(payload.idcode);
+        clearData(payload.idcode);
         resetFrameRate();
         reconnect.onDisconnect(wasStreaming);
+        break;
+      }
+      case "TimestampAnomaly": {
+        const kindKey = ["backward", "gap", "stall"].includes(payload.kind)
+          ? `anomaly.kind.${payload.kind}`
+          : "anomaly.kind.unknown";
+        const message = t("anomaly.toast", {
+          idcode: payload.idcode,
+          kind: t(kindKey),
+          expected: payload.expected_ms.toFixed(1),
+          actual: payload.actual_ms.toFixed(1),
+        });
+        pushToast(message, "error");
+        pushEvent(message, "error");
         break;
       }
       case "Error":

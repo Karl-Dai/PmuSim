@@ -51,6 +51,8 @@ describe("useReconnect", () => {
 
     await vi.advanceTimersByTimeAsync(1000); // 第1次失败 → 排 2s
     await vi.advanceTimersByTimeAsync(2000); // 第2次成功
+    expect(api.reconnecting.value).toBe(true);
+    api.onConnected(false);
     expect(api.reconnecting.value).toBe(false);
 
     invoke.mockClear();
@@ -82,6 +84,9 @@ describe("useReconnect", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(invoke).toHaveBeenCalledWith("connect_substation", { host: "10.0.0.1", port: 8000, dataPort: 8001 });
     expect(invoke).toHaveBeenCalledWith("auto_handshake", { idcode: "10.0.0.1:8000", period: 500 });
+    expect(api.reconnecting.value).toBe(true);
+    api.onConnected(true);
+    expect(api.reconnecting.value).toBe(false);
   });
 
   it("忠实恢复:mode=skipCfg2 → connect + skip_cfg2_open", async () => {
@@ -104,6 +109,30 @@ describe("useReconnect", () => {
     api.onDisconnect(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(invoke).toHaveBeenCalledWith("connect_substation", { host: "10.0.0.1", port: 8000, dataPort: undefined });
+  });
+
+  it("invoke resolve 仅表示命令入队,真实会话事件前保持重连中", async () => {
+    api.arm(target());
+    api.onDisconnect(true);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(api.reconnecting.value).toBe(true);
+    api.onConnected(false);
+    expect(api.reconnecting.value).toBe(true); // 原会话在推流,需等 StreamingStarted
+    api.onConnected(true);
+    expect(api.reconnecting.value).toBe(false);
+  });
+
+  it("placeholder 断开后紧随真实会话创建会取消失败重试", async () => {
+    api.arm(target());
+    api.onDisconnect(true);
+    api.onAttemptFailed(); // placeholder SessionDisconnected 排下一次 2s 重试
+    api.onConnected(false); // 随后的真实 SessionCreated 表示 TCP 已成功
+
+    invoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(api.reconnecting.value).toBe(true); // 仍等 StreamingStarted
   });
 
   it("cancel 清挂起 timer", async () => {

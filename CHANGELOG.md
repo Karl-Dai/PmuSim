@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-10
+
+### Highlights / 亮点
+
+- **自动重连改为由真实连接事件确认**:后端命令入队不再被误判为 TCP 连接成功;失败后按退避策略持续重试,恢复推流后才退出重连状态 / **Auto-reconnect now waits for real connection events**: queueing a backend command is no longer mistaken for TCP success; failures continue through backoff retries, and reconnect mode ends only after streaming is restored.
+- **断线界面不再保留旧数据**:真实会话断开或心跳超时时立即清除对应的最后一帧,避免用户把历史读数误认为当前数据 / **Disconnected views no longer retain stale data**: the matching last frame is cleared immediately after a real session disconnect or heartbeat timeout, preventing historical readings from appearing live.
+- **时标异常提示完整支持中英文**:后端改发结构化异常字段,前端按当前语言生成 toast 与事件日志;不恢复 `v0.13.0` 已移除的异常面板和本地时标偏移读数 / **Timestamp anomaly alerts are fully bilingual**: the backend emits structured anomaly fields and the frontend renders localized toasts and event-log entries; the anomaly panel and local clock-offset readouts removed in `v0.13.0` remain removed.
+- **回归覆盖提升至 31 个前端用例**:新增命令入队与真实连接事件的时序、placeholder 失败退避、断线清帧和英文异常提示测试;Rust 83 个测试继续全绿 / **Regression coverage rises to 31 frontend cases**: new tests cover command-queue versus real-connection timing, placeholder failure backoff, stale-frame cleanup, and English anomaly alerts; all 83 Rust tests remain green.
+
+### Changed 改进
+
+- `useReconnect` 以 `SessionCreated` / `StreamingStarted` 作为重连成功信号,并在 placeholder 失败事件后继续指数退避;真实会话创建会取消已排队的重复连接,推流会话则等待数据管道恢复 / `useReconnect` now treats `SessionCreated` / `StreamingStarted` as reconnect success signals and continues exponential backoff after placeholder failure events; real session creation cancels queued duplicate connects, while previously streaming sessions wait for the data pipe to recover.
+- 时间戳异常由硬编码中文 `Error` 字符串调整为 `TimestampAnomaly` 结构化事件,类型、预期间隔和实际间隔由前端 i18n 格式化 / Timestamp anomalies move from hard-coded Chinese `Error` strings to structured `TimestampAnomaly` events, with kind, expected interval, and actual interval formatted through frontend i18n.
+
+### Fixed 修复
+
+- 修复 `connect_substation` 调用 resolve 后立即结束重连、导致首次异步连接失败时不再重试的问题 / Fixed reconnect stopping as soon as `connect_substation` resolved, which prevented further retries when the asynchronously queued connection later failed.
+- 修复 placeholder 断开与真实会话 re-key 紧邻发生时可能保留失败定时器、产生重复连接的问题 / Fixed a queued failure timer surviving the placeholder-disconnect / real-session re-key sequence and triggering a duplicate connection.
+- 修复真实断线或心跳超时后 `latestData` 仍显示最后一帧的问题 / Fixed `latestData` continuing to show the last frame after a real disconnect or heartbeat timeout.
+- 修复英文界面仍显示中文时间戳异常文案的问题 / Fixed timestamp anomaly messages remaining Chinese while the interface was set to English.
+
+### Tests 测试
+
+- 主站前端 Vitest:6 个测试文件、31 个用例通过;生产构建与中英文无头浏览器回归通过 / Master frontend Vitest: 31 cases across 6 files pass; the production build and bilingual headless-browser regression also pass.
+- Rust 工作区:83 个测试通过(11 个端到端场景 + 72 个库测试),0 失败 / Rust workspace: 83 tests pass (11 end-to-end scenarios plus 72 library tests), with 0 failures.
+
 ## [0.13.0] - 2026-07-10
 
 ### Highlights / 亮点

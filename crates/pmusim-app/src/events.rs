@@ -14,6 +14,15 @@ pub enum PmuEvent {
     DataFrame { idcode: String, data: DataInfo },
     RawFrame { idcode: String, direction: String, hex: String },
     HeartbeatTimeout { idcode: String },
+    TimestampAnomaly {
+        idcode: String,
+        kind: String,
+        expected_ms: f64,
+        actual_ms: f64,
+        soc: u32,
+        fracsec: u32,
+        frame_time: String,
+    },
     Error { idcode: String, error: String },
 }
 

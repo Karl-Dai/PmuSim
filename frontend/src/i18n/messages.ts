@@ -106,6 +106,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.dataPaused': '数据管道暂停',
     'event.heartbeatTimeoutToast': '{idcode}: 心跳超时,已断开',
     'event.heartbeatTimeout': '心跳超时: {idcode}',
+    'anomaly.kind.backward': '回退',
+    'anomaly.kind.gap': '跳变',
+    'anomaly.kind.stall': '停滞',
+    'anomaly.kind.unknown': '未知',
+    'anomaly.toast': '{idcode}: 时间戳{kind},预期 {expected}ms,实际 {actual}ms',
   },
   en: {
     // App / title bar
@@ -212,5 +217,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     'event.dataPaused': 'Data pipe paused',
     'event.heartbeatTimeoutToast': '{idcode}: Heartbeat timeout, disconnected',
     'event.heartbeatTimeout': 'Heartbeat timeout: {idcode}',
+    'anomaly.kind.backward': 'backward',
+    'anomaly.kind.gap': 'gap',
+    'anomaly.kind.stall': 'stall',
+    'anomaly.kind.unknown': 'unknown',
+    'anomaly.toast': '{idcode}: timestamp {kind}, expected {expected}ms, actual {actual}ms',
   },
 }

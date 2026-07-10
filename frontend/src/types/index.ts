@@ -53,4 +53,5 @@ export type PmuEvent =
   | { type: "DataFrame"; idcode: string; data: DataInfo }
   | { type: "RawFrame"; idcode: string; direction: string; hex: string }
   | { type: "HeartbeatTimeout"; idcode: string }
+  | { type: "TimestampAnomaly"; idcode: string; kind: string; expected_ms: number; actual_ms: number; soc: number; fracsec: number; frame_time: string }
   | { type: "Error"; idcode: string; error: string };
