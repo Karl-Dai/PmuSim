@@ -44,12 +44,6 @@ function openGithub() {
   });
 }
 
-function onSnooze() {
-  if (updateMeta.value) {
-    invoke("snooze_update", { version: updateMeta.value.version }).catch(() => {});
-  }
-}
-
 onMounted(async () => {
   // Show the running version in the title bar — getVersion() reads
   // tauri.conf.json's version at runtime, so it always matches the actual build.
@@ -98,7 +92,6 @@ onMounted(async () => {
       :version="updateMeta?.version ?? ''"
       :notes="updateMeta?.notes ?? ''"
       @close="updateVisible = false"
-      @snooze="onSnooze"
     />
   </div>
 </template>
