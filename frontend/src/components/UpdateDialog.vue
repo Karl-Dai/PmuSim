@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from '../i18n'
 
 const props = defineProps<{
@@ -11,15 +10,12 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'snooze'): void
 }>()
 
 const { t } = useI18n()
 
-const downloading = ref(false)
-const progress = ref(0)
+const busy = ref(false)
 const error = ref<string | null>(null)
-let unlisten: UnlistenFn | null = null
 
 type Span = { text: string; bold?: boolean; code?: boolean }
 type Block =
@@ -62,32 +58,37 @@ const noteBlocks = computed<Block[]>(() => {
   return out
 })
 
-async function install() {
+async function runAction(command: string, closeAfter: boolean) {
+  if (busy.value) return
   error.value = null
-  downloading.value = true
-  progress.value = 0
-  unlisten = await listen<number>('update-progress', (e) => {
-    progress.value = e.payload
-  })
+  busy.value = true
   try {
-    await invoke('install_update')
+    const args = command === 'install_update' ? undefined : { version: props.version }
+    await invoke(command, args)
+    if (closeAfter) emit('close')
   } catch (e: any) {
     error.value = String(e)
-    downloading.value = false
   } finally {
-    if (unlisten) { unlisten(); unlisten = null }
+    busy.value = false
   }
 }
 
-function later() {
-  emit('snooze')
-  emit('close')
+function installNow() {
+  return runAction('install_update', false)
+}
+
+function skip() {
+  return runAction('skip_update', true)
+}
+
+function installOnNextLaunch() {
+  return runAction('schedule_update_on_next_launch', true)
 }
 
 function onBackdrop() {
-  if (downloading.value) return
+  if (busy.value) return
   if (error.value) emit('close')
-  else later()
+  else void skip()
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -96,7 +97,6 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
-  if (unlisten) { unlisten(); unlisten = null }
 })
 </script>
 
@@ -115,6 +115,7 @@ onBeforeUnmount(() => {
 
           <div class="upd-body">
             <div class="upd-section-label">{{ t("update.changelog") }}</div>
+            <div class="upd-ready" role="status">{{ t("update.ready") }}</div>
             <div class="upd-notes" tabindex="0">
               <template v-for="(blk, i) in noteBlocks" :key="i">
                 <hr v-if="blk.kind === 'hr'" class="upd-hr" />
@@ -152,16 +153,6 @@ onBeforeUnmount(() => {
               </template>
             </div>
 
-            <div v-if="downloading" class="upd-progress" aria-live="polite">
-              <div class="upd-progress-row">
-                <span>{{ t("update.downloading", { progress }) }}</span>
-                <span class="upd-progress-pct">{{ progress }}%</span>
-              </div>
-              <div class="upd-track">
-                <div class="upd-fill" :style="{ transform: `scaleX(${progress / 100})` }"></div>
-              </div>
-            </div>
-
             <div v-if="error" class="upd-error" role="alert">
               <div class="upd-error-title">{{ t("update.failedTitle") }}</div>
               <pre class="upd-error-msg">{{ error }}</pre>
@@ -169,15 +160,14 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="upd-footer">
-            <template v-if="!downloading && !error">
-              <button class="btn btn-ghost" @click="later">{{ t("update.later") }}</button>
-              <button class="btn btn-primary" @click="install">{{ t("update.installNow") }}</button>
-            </template>
-            <template v-else-if="error">
-              <button class="btn btn-ghost" @click="$emit('close')">{{ t("update.close") }}</button>
-              <button class="btn btn-primary" @click="install">{{ t("update.retry") }}</button>
-            </template>
-            <span v-else class="upd-footer-hint">{{ t("update.downloadingHint", { progress }) }}</span>
+            <span v-if="busy" class="upd-footer-hint">{{ t("update.working") }}</span>
+            <button class="btn btn-ghost" :disabled="busy" @click="skip">{{ t("update.skip") }}</button>
+            <button class="btn btn-secondary" :disabled="busy" @click="installOnNextLaunch">
+              {{ t("update.installNextLaunch") }}
+            </button>
+            <button class="btn btn-primary" :disabled="busy" @click="installNow">
+              {{ t("update.installNow") }}
+            </button>
           </div>
         </div>
       </div>
@@ -238,6 +228,15 @@ onBeforeUnmount(() => {
   color: #666;
   margin-bottom: 6px;
 }
+.upd-ready {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border: 1px solid #a7cfac;
+  border-radius: 4px;
+  background: #edf8ef;
+  color: #246b31;
+  font-size: 12px;
+}
 .upd-notes {
   background: #fff;
   border: 1px solid #cfcfc6;
@@ -287,32 +286,6 @@ onBeforeUnmount(() => {
   color: #555;
 }
 .upd-hr { border: none; border-top: 1px solid #d0d0c8; margin: 10px 0; }
-.upd-progress { margin-top: 12px; }
-.upd-progress-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #333;
-  margin-bottom: 4px;
-}
-.upd-progress-pct {
-  font-variant-numeric: tabular-nums;
-  color: #1a4f8b;
-  font-weight: 600;
-}
-.upd-track {
-  height: 6px;
-  border-radius: 999px;
-  background: #d8d8d0;
-  overflow: hidden;
-}
-.upd-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(#5a8ccc, #2c5a99);
-  transform-origin: left;
-  transition: transform 200ms ease-out;
-}
 .upd-error {
   margin-top: 12px;
   padding: 8px 10px;
@@ -348,9 +321,12 @@ onBeforeUnmount(() => {
   font-weight: 500;
   transition: background 140ms ease, border-color 140ms ease;
 }
+.btn:disabled { cursor: wait; opacity: 0.55; }
 .btn:focus-visible { outline: 2px solid #5a8ccc; outline-offset: 2px; }
 .btn-primary { background: linear-gradient(#5a8ccc, #2c5a99); color: #fff; border-color: #1d4377; }
 .btn-primary:hover { background: linear-gradient(#6a9cdc, #3c6aa9); }
+.btn-secondary { background: #d9e5f4; color: #1d4377; border-color: #8aa8cc; }
+.btn-secondary:hover { background: #e8f0f9; }
 .btn-ghost { background: #ebebe2; color: #333; border-color: #b8b8b0; }
 .btn-ghost:hover { background: #f5f5ec; }
 </style>
