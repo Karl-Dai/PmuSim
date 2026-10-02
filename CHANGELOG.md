@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-10-02
+
+### Highlights / 亮点
+
+- 修复主站与子站 Linux AppImage 启动器权限，普通用户也可直接启动 / Fix launcher permissions in both Linux AppImages so ordinary users can launch them.
+- 主站在后台下载并验证更新包后再提示，支持立即更新、下次启动更新或跳过版本 / The master downloads and verifies updates in the background, then offers install now, install on next launch or skip this version.
+- 主站与子站 AppImage 增加封装权限检查和 Linux 无头窗口启动验证 / Both AppImages gain packaged-permission checks and headless Linux window startup validation.
+
+### Fixed 修复
+
+- Tauri 缓存的 AppRun 默认 0770 权限被原样封装且归 root 所有，导致普通用户执行 AppRun.wrapped 时收到 Permission denied；发布前将启动器权限设为 0755 / Tauri's cached AppRun was packaged as root-owned mode 0770, causing Permission denied for ordinary users; prepare the launcher as mode 0755 before packaging.
+
+### Changed 改进
+
+- 静默更新下载失败不再弹出打断操作的对话框，已下载并验证的更新才显示安装选择 / Failed background downloads no longer interrupt the user; installation choices appear only for a downloaded and verified update.
+- Linux 发布必须通过实际产物的权限检查与启动测试，失败时不发布草稿版本 / Linux releases must pass permission and startup checks against the built artifact before the draft release can be published.
+
 ## [0.13.1] - 2026-07-10
 
 ### Highlights / 亮点

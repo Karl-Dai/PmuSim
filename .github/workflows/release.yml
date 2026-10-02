@@ -59,13 +59,17 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xdotool x11-utils openbox dbus-x11
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
       # Frontend build is run by tauri's beforeBuildCommand inside tauri-action below.
+
+      - name: Prepare readable AppImage launcher
+        if: matrix.platform == 'ubuntu-22.04'
+        run: bash scripts/prepare-appimage-tools.sh
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -91,6 +95,10 @@ jobs:
           # the source of the flaky "delete-a-release-asset" 404 race. Skip it.
           includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      - name: Verify packaged AppImage permissions and startup
+        if: matrix.platform == 'ubuntu-22.04'
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSim_*.AppImage pmusim-app 'PmuSim'
 
   # Substation simulator (PmuSub). Mirrors the master `release` job but builds
   # crates/pmusim-sub instead. The sub has NO in-app updater, so it needs no
@@ -138,11 +146,15 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xdotool x11-utils openbox dbus-x11
 
       - name: Install frontend dependencies
         working-directory: frontend-sub
         run: npm ci
+
+      - name: Prepare readable AppImage launcher
+        if: matrix.platform == 'ubuntu-22.04'
+        run: bash scripts/prepare-appimage-tools.sh
 
       - name: Build and release (substation)
         uses: tauri-apps/tauri-action@v0
@@ -158,6 +170,10 @@ jobs:
           prerelease: false
           includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      - name: Verify packaged AppImage permissions and startup
+        if: matrix.platform == 'ubuntu-22.04'
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSub_*.AppImage pmusim-sub 'PmuSim'
 
   publish-manifest:
     # Wait for BOTH apps. release-sub is continue-on-error, so a sub build
