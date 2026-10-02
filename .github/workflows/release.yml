@@ -197,9 +197,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit ${{ github.ref_name }} --draft=false
-      - name: Install script deps
-        working-directory: scripts
-        run: npm install --no-audit --no-fund
+      # Release metadata scripts use only Node built-ins; no install is needed.
       - name: Generate manifests
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
