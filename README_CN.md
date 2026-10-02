@@ -1,3 +1,5 @@
+# PmuSim
+
 <div align="center">
 
 <img src="docs/screenshots/banner.svg" alt="PmuSim" width="100%">
