@@ -4,9 +4,19 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 补全已构建版本的更新清单和发布说明
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   release:
+    if: github.event_name != 'workflow_dispatch'
     permissions:
       contents: write
     strategy:
@@ -107,6 +117,7 @@ jobs:
   # this is the sub's first time through CI, and a failure here must not fail
   # the release / leave it stuck as a draft — the master installers still ship.
   release-sub:
+    if: github.event_name != 'workflow_dispatch'
     permissions:
       contents: write
     continue-on-error: true
@@ -179,14 +190,44 @@ jobs:
     # Wait for BOTH apps. release-sub is continue-on-error, so a sub build
     # failure still lets this run and ship the master installers + manifest.
     needs: [release, release-sub]
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (needs.release.result == 'success' && needs['release-sub'].result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Validate stable release tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid release tag"
+            exit 1
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Validate existing installers before recovery
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > /tmp/release-assets.json
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          import { buildBody } from './scripts/build-release-notes.mjs'
+          const release = JSON.parse(readFileSync('/tmp/release-assets.json', 'utf8'))
+          const names = new Set(release.assets.filter(a => a.state === 'uploaded' && a.size > 0).map(a => a.name))
+          const body = buildBody(process.env.RELEASE_TAG, readFileSync('CHANGELOG.md', 'utf8'))
+          const expected = [...body.matchAll(/`((?:PmuSim|PmuSub)[^`]+\.(?:dmg|exe|msi|AppImage|deb|rpm))`/g)].map(m => m[1])
+          const missing = expected.filter(name => !names.has(name))
+          if (!expected.length || missing.length) throw new Error(`Missing installers: ${missing.join(', ')}`)
+          console.log(`Verified ${expected.length} published installers before recovery`)
+          NODE
       # Un-draft first: this job only runs once every build succeeded, so the
       # release is now complete enough to go live. Publishing here (rather than
       # last) lets the manifest scripts run against a normal published release
@@ -196,18 +237,18 @@ jobs:
       - name: Publish release (clear draft flag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit ${{ github.ref_name }} --draft=false
+        run: gh release edit "$RELEASE_TAG" --draft=false
       # Release metadata scripts use only Node built-ins; no install is needed.
       - name: Generate manifests
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/gen-update-manifest.mjs ${{ github.ref_name }}
+        run: node scripts/gen-update-manifest.mjs "$RELEASE_TAG"
       - name: Upload manifests to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for attempt in 1 2 3 4 5; do
-            if gh release upload ${{ github.ref_name }} \
+            if gh release upload "$RELEASE_TAG" \
               latest-pmusim.json latest-pmusim-cn1.json latest-pmusim-cn2.json latest-pmusim-cn3.json \
               --clobber; then exit 0; fi
             echo "::warning::manifest upload attempt $attempt failed, retrying in 10s"
@@ -216,9 +257,9 @@ jobs:
           echo "::error::manifest upload failed after 5 attempts"; exit 1
 
       - name: Render rich release body from CHANGELOG
-        run: node scripts/build-release-notes.mjs ${{ github.ref_name }}
+        run: node scripts/build-release-notes.mjs "$RELEASE_TAG"
 
       - name: Replace release body
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit ${{ github.ref_name }} --notes-file RELEASE_BODY.md
+        run: gh release edit "$RELEASE_TAG" --notes-file RELEASE_BODY.md
