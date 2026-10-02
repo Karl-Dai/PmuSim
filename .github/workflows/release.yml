@@ -98,7 +98,7 @@ jobs:
 
       - name: Verify packaged AppImage permissions and startup
         if: matrix.platform == 'ubuntu-22.04'
-        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSim_*.AppImage pmusim-app
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSim_*.AppImage pmusim-app 'PmuSim'
 
   # Substation simulator (PmuSub). Mirrors the master `release` job but builds
   # crates/pmusim-sub instead. The sub has NO in-app updater, so it needs no
@@ -173,7 +173,7 @@ jobs:
 
       - name: Verify packaged AppImage permissions and startup
         if: matrix.platform == 'ubuntu-22.04'
-        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSub_*.AppImage pmusim-sub
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/PmuSub_*.AppImage pmusim-sub 'PmuSim'
 
   publish-manifest:
     # Wait for BOTH apps. release-sub is continue-on-error, so a sub build

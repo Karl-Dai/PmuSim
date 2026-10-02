@@ -42,4 +42,4 @@ jobs:
         working-directory: ${{ matrix.project }}
         run: ../../${{ matrix.frontend }}/node_modules/.bin/tauri build --bundles appimage --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - name: Verify packaged permissions and startup
-        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/${{ matrix.product }}_*.AppImage ${{ matrix.binary }}
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/${{ matrix.product }}_*.AppImage ${{ matrix.binary }} 'PmuSim'
