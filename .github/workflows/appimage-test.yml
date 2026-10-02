@@ -1,0 +1,45 @@
+name: AppImage smoke test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - frontend: frontend
+            project: crates/pmusim-app
+            product: PmuSim
+            binary: pmusim-app
+          - frontend: frontend-sub
+            project: crates/pmusim-sub
+            product: PmuSub
+            binary: pmusim-sub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xdotool
+      - name: Install frontend dependencies
+        working-directory: ${{ matrix.frontend }}
+        run: npm ci
+      - name: Prepare readable AppImage launcher
+        run: bash scripts/prepare-appimage-tools.sh
+      - name: Build unsigned AppImage
+        working-directory: ${{ matrix.project }}
+        run: ../../${{ matrix.frontend }}/node_modules/.bin/tauri build --bundles appimage --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Verify packaged permissions and startup
+        run: bash scripts/verify-appimage.sh target/release/bundle/appimage/${{ matrix.product }}_*.AppImage ${{ matrix.binary }}
